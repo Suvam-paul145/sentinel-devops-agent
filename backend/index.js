@@ -326,6 +326,21 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 globalWsBroadcaster = setupWebSocket(server);
 serviceMonitor.setWsBroadcaster(globalWsBroadcaster);
 
+// Listen for container predictions
+containerMonitor.on('prediction', (prediction) => {
+    if (prediction.probability > 0.8 && prediction.confidence !== 'low') {
+        incidents.logActivity('alert', `🔮 Prediction: Container ${prediction.containerId.substring(0, 12)} risk ${Math.round(prediction.probability * 100)}%. ${prediction.reason}`);
+        
+        if (prediction.probability > 0.85) {
+            console.log(`[Healing] Triggering preventive maintenance for ${prediction.containerId}`);
+        }
+    }
+
+    if (globalWsBroadcaster) {
+        globalWsBroadcaster.broadcast('PREDICTION', prediction);
+    }
+});
+
 // K8s Watcher Event Handling
 k8sWatcher.on('oom', (pod) => {
     incidents.logActivity('alert', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) OOMKilled`);

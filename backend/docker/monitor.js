@@ -1,11 +1,17 @@
 const { docker } = require('./client');
 const { scanImage } = require('../security/scanner');
+const EventEmitter = require('events');
+const metricsStore = require('../db/metrics-store');
+const { predictContainer } = require('./predictor');
 
-class ContainerMonitor {
+class ContainerMonitor extends EventEmitter {
     constructor() {
+        super();
         this.metrics = new Map();
         this.watchers = new Map();
         this.securityTimers = new Map();
+        this.restartCounts = new Map();
+        this.containerNames = new Map();
     }
 
     async startMonitoring(containerId) {
@@ -15,6 +21,11 @@ class ContainerMonitor {
             const container = docker.getContainer(containerId);
             const data = await container.inspect();
             const imageId = data.Image;
+            
+            // Track initial restart count
+            this.restartCounts.set(containerId, data.RestartCount || 0);
+            // Track container name
+            this.containerNames.set(containerId, data.Name.replace(/^\//, ''));
 
             const stream = await container.stats({ stream: true });
             
@@ -26,11 +37,31 @@ class ContainerMonitor {
             stream.on('data', (chunk) => {
                 try {
                     const stats = JSON.parse(chunk.toString());
-                    this.metrics.set(containerId, this.parseStats(stats));
+                    const parsed = this.parseStats(stats);
+                    this.metrics.set(containerId, parsed);
+
+                    // Push to metrics store for prediction
+                    metricsStore.push(containerId, {
+                        cpuPercent: parsed.raw.cpuPercent,
+                        memPercent: parsed.raw.memPercent,
+                        restartCount: this.restartCounts.get(containerId) || 0
+                    });
+
+                    // Run prediction
+                    const prediction = predictContainer(containerId);
+                    if (prediction && prediction.probability > 0.3) {
+                        const enrichedPrediction = {
+                            ...prediction,
+                            containerName: this.containerNames.get(containerId)
+                        };
+                        this.emit('prediction', enrichedPrediction);
+                    }
+
                 } catch (e) {
                     // Ignore parse errors from partial chunks
                 }
             });
+
 
             stream.on('error', (err) => {
                 console.error(`Stream error for ${containerId}:`, err);
@@ -115,7 +146,11 @@ class ContainerMonitor {
                 rx: this.formatBytes(stats.networks?.eth0?.rx_bytes || 0),
                 tx: this.formatBytes(stats.networks?.eth0?.tx_bytes || 0)
             },
-            timestamp: new Date()
+            timestamp: new Date(),
+            raw: {
+                cpuPercent,
+                memPercent
+            }
         };
     }
 
