@@ -66,7 +66,10 @@ export function ForecastChart({ history, label, threshold, prediction, unit = '%
                     <YAxis domain={[0, 100]} hide />
                     <Tooltip 
                         contentStyle={{ backgroundColor: '#1f2937', border: 'none', borderRadius: '8px' }}
-                        formatter={(val: number) => [`${val.toFixed(1)}${unit}`, label]}
+                        formatter={(value, name) => {
+                            const n = typeof value === 'number' ? value : Number(value);
+                            return [`${Number.isFinite(n) ? n.toFixed(1) : value}${unit}`, label];
+                        }}
                     />
                     <Area 
                         type="monotone" 

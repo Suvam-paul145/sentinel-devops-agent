@@ -17,6 +17,10 @@ class MetricsStore {
   getWindow(containerId, points = 60) {
     return (this.data.get(containerId) || []).slice(-points);
   }
+
+  clear(containerId) {
+    this.data.delete(containerId);
+  }
 }
 
 module.exports = new MetricsStore();

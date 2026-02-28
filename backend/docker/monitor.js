@@ -12,6 +12,7 @@ class ContainerMonitor extends EventEmitter {
         this.securityTimers = new Map();
         this.restartCounts = new Map();
         this.containerNames = new Map();
+        this.lastInspectTimes = new Map();
     }
 
     async startMonitoring(containerId) {
@@ -34,11 +35,25 @@ class ContainerMonitor extends EventEmitter {
             // Schedule periodic scans after successful stream setup
             this.scheduleSecurityScan(containerId, imageId);
 
-            stream.on('data', (chunk) => {
+            stream.on('data', async (chunk) => {
                 try {
                     const stats = JSON.parse(chunk.toString());
                     const parsed = this.parseStats(stats);
                     this.metrics.set(containerId, parsed);
+
+                    // Throttle inspect requests to every 30s to update restart counts
+                    const now = Date.now();
+                    const lastInspect = this.lastInspectTimes.get(containerId) || 0;
+                    
+                    if (now - lastInspect > 30000) {
+                        try {
+                            const currentInfo = await container.inspect();
+                            this.restartCounts.set(containerId, currentInfo.RestartCount || 0);
+                            this.lastInspectTimes.set(containerId, now);
+                        } catch (inspectError) {
+                            // Suppress transient inspect errors
+                        }
+                    }
 
                     // Push to metrics store for prediction
                     metricsStore.push(containerId, {
@@ -85,6 +100,7 @@ class ContainerMonitor extends EventEmitter {
             if (stream.destroy) stream.destroy();
             this.watchers.delete(containerId);
             this.metrics.delete(containerId);
+            metricsStore.clear(containerId);
         }
         if (this.securityTimers.has(containerId)) {
             clearInterval(this.securityTimers.get(containerId));

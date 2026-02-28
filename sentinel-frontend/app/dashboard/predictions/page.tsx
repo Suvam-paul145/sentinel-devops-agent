@@ -10,8 +10,10 @@ import { Spotlight } from "@/components/common/Spotlight";
 import { Button } from "@/components/common/Button";
 import { Clock, TrendingUp, AlertTriangle, ShieldCheck } from "lucide-react";
 
+const RISK_THRESHOLD = 0.5;
+
 export default function PredictionsPage() {
-    const { containers, loading, refetch } = useContainers();
+    const { containers, loading, refetch: refetchContainers } = useContainers();
     const predictions = usePredictions();
 
     const stats = useMemo(() => {
@@ -20,7 +22,7 @@ export default function PredictionsPage() {
         let unknown = 0;
         containers.forEach(c => {
             const pred = predictions[c.id];
-            if (pred && pred.probability > 0.5) risky++;
+            if (pred && pred.probability > RISK_THRESHOLD) risky++;
             else if (pred) safe++;
             else unknown++;
         });
@@ -75,7 +77,7 @@ export default function PredictionsPage() {
                         const prediction = predictions[container.id];
                         // If no prediction or low risk, show mostly neutral
                         // If high risk, show forecast
-                        const isRisky = prediction && prediction.probability > 0.3;
+                        const isRisky = prediction && prediction.probability > RISK_THRESHOLD;
 
                         // Mock history for forecast visualization
                         // In real app, pass actual metrics history

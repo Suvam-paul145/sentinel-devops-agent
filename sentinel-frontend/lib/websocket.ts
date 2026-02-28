@@ -18,12 +18,15 @@ export interface IncidentNewPayload {
     [key: string]: unknown;
 }
 
+import { Prediction } from '@/components/dashboard/PredictionBadge';
+
 export type WebSocketMessage =
     | { type: 'INIT'; data: InitPayload }
     | { type: 'SERVICE_UPDATE'; data: { name: string; status: string; code: number; lastUpdated: string } }
     | { type: 'METRICS'; data: MetricsPayload }
     | { type: 'INCIDENT_NEW'; data: IncidentNewPayload }
-    | { type: 'INCIDENT_RESOLVED'; data: { id: string } };
+    | { type: 'INCIDENT_RESOLVED'; data: { id: string } }
+    | { type: 'PREDICTION'; data: Prediction };
 
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ||
     (typeof window !== 'undefined'

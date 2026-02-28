@@ -29,6 +29,11 @@ function predictContainer(containerId) {
   const cpuSlope = linearRegression(cpuValues);
   const memSlope = linearRegression(memValues);
   
+  // Convert slope (per 5s tick) to per-minute rate
+  // 60s / 5s = 12 points per minute
+  const POINTS_PER_MINUTE = 12;
+  const memSlopePerMinute = memSlope * POINTS_PER_MINUTE;
+
   const currentRestarts = restarts[restarts.length - 1] || 0;
   const initialRestarts = restarts[0] || 0;
   const recentRestarts = currentRestarts - initialRestarts;
@@ -37,9 +42,9 @@ function predictContainer(containerId) {
   let reasons = [];
 
   const lastMem = memValues[memValues.length - 1];
-  if (memSlope > 0.5 && lastMem > 70) {
+  if (memSlopePerMinute > 0.5 && lastMem > 70) {
     probability = Math.min(probability + 0.4, 1.0);
-    reasons.push(`Memory growing at ${memSlope.toFixed(1)}%/min, currently ${lastMem.toFixed(0)}%`);
+    reasons.push(`Memory growing at ${memSlopePerMinute.toFixed(1)}%/min, currently ${lastMem.toFixed(0)}%`);
   }
 
   const lastCpu = cpuValues[cpuValues.length - 1];
