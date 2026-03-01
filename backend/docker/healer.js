@@ -1,30 +1,35 @@
-const { docker } = require('./client');
+const { hostManager } = require('./client');
 
-async function restartContainer(containerId) {
+async function restartContainer(compoundId) {
     try {
-        const container = docker.getContainer(containerId);
+        const { hostId, containerId } = hostManager.parseId(compoundId);
+        const hostData = hostManager.get(hostId);
+        if (!hostData || !hostData.client) throw new Error(`Host disconnected: ${hostId}`);
+
+        const container = hostData.client.getContainer(containerId);
         await container.restart({ t: 10 });
-        return { action: 'restart', success: true, containerId };
+        return { action: 'restart', success: true, containerId: compoundId };
     } catch (error) {
-        console.error(`Failed to restart container ${containerId}:`, error);
-        return { action: 'restart', success: false, containerId, error: error.message };
+        console.error(`Failed to restart container ${compoundId}:`, error);
+        return { action: 'restart', success: false, containerId: compoundId, error: error.message };
     }
 }
 
-async function recreateContainer(containerId) {
+async function recreateContainer(compoundId) {
     try {
-        const container = docker.getContainer(containerId);
+        const { hostId, containerId } = hostManager.parseId(compoundId);
+        const hostData = hostManager.get(hostId);
+        if (!hostData || !hostData.client) throw new Error(`Host disconnected: ${hostId}`);
+
+        const container = hostData.client.getContainer(containerId);
         const info = await container.inspect();
 
-        // Prepare new configuration
-        // Use proper mapping for NetworkingConfig from validated inspection
         const networkingConfig = {
             EndpointsConfig: info.NetworkSettings.Networks
         };
 
-        // Create new container first
         const newName = `${info.Name.replace('/', '')}-new`;
-        const newContainer = await docker.createContainer({
+        const newContainer = await hostData.client.createContainer({
             Image: info.Config.Image,
             name: newName,
             ...info.Config,
@@ -34,29 +39,29 @@ async function recreateContainer(containerId) {
 
         await newContainer.start();
 
-        // Now safely remove the old one if it was running
         if (info.State.Running) {
             await container.stop();
         }
         await container.remove();
 
-        // Rename new container to old name
         await newContainer.rename({ name: info.Name.replace('/', '') });
 
-        return { action: 'recreate', success: true, newId: newContainer.id };
+        return { action: 'recreate', success: true, newId: `${hostId}:${newContainer.id}` };
     } catch (error) {
-        console.error(`Failed to recreate container ${containerId}:`, error);
-        return { action: 'recreate', success: false, containerId, error: error.message };
+        console.error(`Failed to recreate container ${compoundId}:`, error);
+        return { action: 'recreate', success: false, containerId: compoundId, error: error.message };
     }
 }
 
-async function scaleService(serviceName, replicas) {
+async function scaleService(serviceName, replicas, hostId = 'local') {
     try {
-        const service = docker.getService(serviceName);
+        const hostData = hostManager.get(hostId); // Typically swarm is host specific
+        if (!hostData || !hostData.client) throw new Error(`Host disconnected: ${hostId}`);
+
+        const service = hostData.client.getService(serviceName);
         const info = await service.inspect();
         const version = info.Version.Index;
 
-        // Merge new replicas into existing spec
         const spec = { ...info.Spec };
         if (!spec.Mode) spec.Mode = {};
         if (!spec.Mode.Replicated) spec.Mode.Replicated = {};

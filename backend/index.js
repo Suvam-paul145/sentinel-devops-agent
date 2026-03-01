@@ -7,7 +7,8 @@ const { ERRORS } = require('./lib/errors');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-const { listContainers, getContainerHealth } = require('./docker/client');
+const { loadHostsConfig } = require('./config/hosts');
+const { hostManager, listContainers, getContainerHealth } = require('./docker/client');
 const containerMonitor = require('./docker/monitor');
 const healer = require('./docker/healer');
 
@@ -26,6 +27,7 @@ const authRoutes = require('./routes/auth.routes');
 const usersRoutes = require('./routes/users.routes');
 const rolesRoutes = require('./routes/roles.routes');
 const kubernetesRoutes = require('./routes/kubernetes.routes');
+const hostsRoutes = require('./routes/hosts.routes');
 const { apiLimiter } = require('./middleware/rateLimiter');
 
 // Distributed Traces Routes
@@ -45,8 +47,8 @@ app.use('/api', apiLimiter);
 // Routes
 app.use('/auth', authRoutes);
 app.use('/api/users', usersRoutes);
-app.use('/api/slo', sloRoutes);
 app.use('/api/roles', rolesRoutes);
+app.use('/api/hosts', hostsRoutes);
 
 // Distributed Traces Routes
 app.use('/api/traces', traceRoutes);
@@ -110,19 +112,19 @@ app.get('/api/insights', (req, res) => {
 app.post('/api/kestra-webhook', (req, res) => {
   const { aiReport, metrics } = req.body;
   const systemStatus = serviceMonitor.getSystemStatus();
-  
+
   if (aiReport) {
     systemStatus.aiAnalysis = aiReport;
     const insight = incidents.addAiLog(aiReport);
 
     incidents.logActivity('info', 'Received new AI Analysis report');
-    
+
     if (globalWsBroadcaster) {
-        globalWsBroadcaster.broadcast('INCIDENT_NEW', insight);
+      globalWsBroadcaster.broadcast('INCIDENT_NEW', insight);
     }
   }
   systemStatus.lastUpdated = new Date();
-  
+
   if (metrics) {
     Object.keys(metrics).forEach(serviceName => {
       if (systemStatus.services[serviceName]) {
@@ -142,7 +144,7 @@ app.post('/api/kestra-webhook', (req, res) => {
     });
 
     if (globalWsBroadcaster) {
-        globalWsBroadcaster.broadcast('METRICS', systemStatus);
+      globalWsBroadcaster.broadcast('METRICS', systemStatus);
     }
   }
 
@@ -153,8 +155,6 @@ app.post('/api/action/:service/:type', async (req, res) => {
   const { service, type } = req.params;
   const serviceMap = { 'auth': 3001, 'payment': 3002, 'notification': 3003 };
   const port = serviceMap[service];
-
-  incidents.logActivity('info', ERRORS.SERVICE_NOT_FOUND(service).toJSON()ervice}'`);
 
   if (!port) {
     incidents.logActivity('warn', `Failed action '${type}': Invalid service '${service}'`);
@@ -171,7 +171,7 @@ app.post('/api/action/:service/:type', async (req, res) => {
     // Force a health check to update status immediately
     await serviceMonitor.checkServiceHealth();
 
-    incidents.logActivityERRORS.ACTION_FAILED().toJSON()pe}' on ${service}`);
+    incidents.logActivity('info', `Action '${type}' executed on ${service}`);
     res.json({ success: true, message: `${type} executed on ${service}` });
   } catch (error) {
     incidents.logActivity('error', `Action '${type}' on ${service} failed: ${error.message}`);
@@ -186,16 +186,15 @@ const requireDockerAuth = (req, res, next) => {
   // In a real app, check 'Authorization' header
   // For now, assume authenticated if internal or trusted
   next();
-};ERRORS.INVALID_ID().toJSON());
+};
+
+const validateId = (req, res, next) => {
+  if (!req.params.id) {
+    return res.status(400).json({ error: 'Invalid ID' });
   }
   next();
 };
 
-const validateScaleParams = (req, res, next) => {
-  const replicasRaw = req.params.replicas;
-  const replicas = Number(replicasRaw);
-  if (!req.params.service || !/^\d+$/.test(replicasRaw) || !Number.isInteger(replicas) || replicas < 0 || replicas > 100) {
-    return res.status(400).json(ERRORS.INVALID_SCALE_PARAMS().toJSON()
 const validateScaleParams = (req, res, next) => {
   const replicas = parseInt(req.params.replicas, 10);
   if (!req.params.service || isNaN(replicas) || replicas < 0 || replicas > 100) {
@@ -218,7 +217,7 @@ app.get('/api/docker/containers', async (req, res) => {
         metrics: containerMonitor.getMetrics(c.id), // Include current metrics snapshot
         restartCount: tracker.attempts,
         lastRestart: tracker.lastAttempt
-      };ERRORS.DOCKER_CONNECTION().toJSON()
+      };
     });
 
     res.json({ containers: enrichedContainers });
@@ -227,16 +226,13 @@ app.get('/api/docker/containers', async (req, res) => {
   }
 });
 
-app.get('/api/docker/healERRORS.DOCKER_CONNECTION().toJSON()nc (req, res) => {
+app.get('/api/docker/health/:id', validateId, async (req, res) => {
   try {
     const health = await getContainerHealth(req.params.id);
     res.json(health);
   } catch (error) {
     res.status(500).json({ error: error.message });
-  if (!metrics) {
-    return res.status(404).json(ERRORS.NO_DATA().toJSON());
   }
-  res.json(metrics
 });
 
 app.get('/api/docker/metrics/:id', validateId, (req, res) => {
@@ -250,7 +246,11 @@ app.post('/api/docker/try-restart/:id', requireDockerAuth, validateId, async (re
   let tracker = restartTracker.get(id) || { attempts: 0, lastAttempt: 0 };
 
   // Reset attempts if outside grace period
-  if (now - tracker.lastAttempt ERRORS.MAX_RESTARTS_EXCEEDED().toJSON());
+  if (now - tracker.lastAttempt > GRACE_PERIOD_MS) {
+    tracker.attempts = 0;
+  }
+  if (tracker.attempts >= MAX_RESTARTS) {
+    return res.status(429).json({ error: 'Max restarts exceeded' });
   }
 
   tracker.attempts++;
@@ -301,12 +301,12 @@ app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScal
   }
 });
 
-app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScaleParams, async (req, res) => {
-  const result = await healer.scaleService(req.params.service, req.params.replicas);
-  res.json(result);
-});
-
 let globalWsBroadcaster;
+
+const hostsConfig = loadHostsConfig();
+hostManager.loadHosts(hostsConfig).then(() => {
+  console.log(`🔗 Docker Host Manager initialized with ${hostsConfig.length} host(s)`);
+});
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Sentinel Backend running on http://0.0.0.0:${PORT}`);
@@ -318,37 +318,37 @@ serviceMonitor.setWsBroadcaster(globalWsBroadcaster);
 
 // K8s Watcher Event Handling
 k8sWatcher.on('oom', (pod) => {
-    incidents.logActivity('alert', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) OOMKilled`);
-    if (globalWsBroadcaster) {
-        globalWsBroadcaster.broadcast('K8S_EVENT', {
-            type: 'OOM',
-            pod,
-            message: `Pod ${pod.name} was OOMKilled`
-        });
-    }
+  incidents.logActivity('alert', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) OOMKilled`);
+  if (globalWsBroadcaster) {
+    globalWsBroadcaster.broadcast('K8S_EVENT', {
+      type: 'OOM',
+      pod,
+      message: `Pod ${pod.name} was OOMKilled`
+    });
+  }
 });
 
 k8sWatcher.on('crashloop', (pod) => {
-    incidents.logActivity('warn', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) CrashLoopBackOff`);
-    if (globalWsBroadcaster) {
-        globalWsBroadcaster.broadcast('K8S_EVENT', {
-            type: 'CRASHLOOP',
-            pod,
-            message: `Pod ${pod.name} is in CrashLoopBackOff`
-        });
-    }
+  incidents.logActivity('warn', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) CrashLoopBackOff`);
+  if (globalWsBroadcaster) {
+    globalWsBroadcaster.broadcast('K8S_EVENT', {
+      type: 'CRASHLOOP',
+      pod,
+      message: `Pod ${pod.name} is in CrashLoopBackOff`
+    });
+  }
 });
 
 // Start watching default namespace by default (can be expanded via API)
 k8sWatcher.watchPods('default', (type, pod) => {
-    if (globalWsBroadcaster) {
-        globalWsBroadcaster.broadcast('K8S_POD_UPDATE', { type, pod });
-    }
+  if (globalWsBroadcaster) {
+    globalWsBroadcaster.broadcast('K8S_POD_UPDATE', { type, pod });
+  }
 });
 k8sWatcher.watchEvents('default', (event) => {
-     if (globalWsBroadcaster) {
-        globalWsBroadcaster.broadcast('K8S_EVENT_STREAM', event);
-    }
+  if (globalWsBroadcaster) {
+    globalWsBroadcaster.broadcast('K8S_EVENT_STREAM', event);
+  }
 });
 
 

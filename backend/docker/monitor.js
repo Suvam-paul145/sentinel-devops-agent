@@ -1,4 +1,4 @@
-const { docker } = require('./client');
+const { hostManager } = require('./client');
 
 class ContainerMonitor {
     constructor() {
@@ -6,56 +6,60 @@ class ContainerMonitor {
         this.watchers = new Map();
     }
 
-    async startMonitoring(containerId) {
-        if (this.watchers.has(containerId)) return;
+    async startMonitoring(compoundId) {
+        if (this.watchers.has(compoundId)) return;
+
+        const { hostId, containerId } = hostManager.parseId(compoundId);
+        const hostData = hostManager.get(hostId);
+
+        if (!hostData || !hostData.client) {
+            console.error(`Failed to start monitoring ${compoundId}: Host disconnected`);
+            return;
+        }
 
         try {
-            const container = docker.getContainer(containerId);
+            const container = hostData.client.getContainer(containerId);
             const stream = await container.stats({ stream: true });
 
             stream.on('data', (chunk) => {
                 try {
                     const stats = JSON.parse(chunk.toString());
-                    this.metrics.set(containerId, this.parseStats(stats));
+                    this.metrics.set(compoundId, this.parseStats(stats));
                 } catch (e) {
                     // Ignore parse errors from partial chunks
                 }
             });
 
             stream.on('error', (err) => {
-                console.error(`Stream error for ${containerId}:`, err);
-                this.stopMonitoring(containerId);
+                console.error(`Stream error for ${compoundId}:`, err);
+                this.stopMonitoring(compoundId);
             });
 
             stream.on('end', () => {
-                this.stopMonitoring(containerId);
+                this.stopMonitoring(compoundId);
             });
 
-            this.watchers.set(containerId, stream);
+            this.watchers.set(compoundId, stream);
         } catch (error) {
-            console.error(`Failed to start monitoring ${containerId}:`, error);
+            console.error(`Failed to start monitoring ${compoundId}:`, error);
         }
     }
 
-    stopMonitoring(containerId) {
-        if (this.watchers.has(containerId)) {
-            const stream = this.watchers.get(containerId);
+    stopMonitoring(compoundId) {
+        if (this.watchers.has(compoundId)) {
+            const stream = this.watchers.get(compoundId);
             if (stream.destroy) stream.destroy();
-            this.watchers.delete(containerId);
-            this.metrics.delete(containerId);
+            this.watchers.delete(compoundId);
+            this.metrics.delete(compoundId);
         }
     }
 
     parseStats(stats) {
-        // Calculate CPU percentage safely
         let cpuPercent = 0.0;
-
-        // Defensive read of nested properties
         const cpuUsage = stats.cpu_stats?.cpu_usage?.total_usage || 0;
         const preCpuUsage = stats.precpu_stats?.cpu_usage?.total_usage || 0;
         const systemCpuUsage = stats.cpu_stats?.system_cpu_usage || 0;
         const preSystemCpuUsage = stats.precpu_stats?.system_cpu_usage || 0;
-        // Default to 1 online cpu if missing to avoid division issues (stats often omit this on some platforms)
         const onlineCpus = stats.cpu_stats?.online_cpus || stats.cpu_stats?.cpu_usage?.percpu_usage?.length || 1;
 
         const cpuDelta = cpuUsage - preCpuUsage;
@@ -65,8 +69,6 @@ class ContainerMonitor {
             cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100;
         }
 
-        // Calculate memory percentage safely
-        // memory_stats might be missing or empty on some platforms/versions
         const memStats = stats.memory_stats || {};
         const memUsage = memStats.usage || 0;
         const memLimit = memStats.limit || 0;
@@ -96,13 +98,12 @@ class ContainerMonitor {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        // Clamp index to valid range
         const safeIndex = Math.min(Math.max(i, 0), sizes.length - 1);
         return parseFloat((bytes / Math.pow(k, safeIndex)).toFixed(2)) + ' ' + sizes[safeIndex];
     }
 
-    getMetrics(containerId) {
-        return this.metrics.get(containerId);
+    getMetrics(compoundId) {
+        return this.metrics.get(compoundId);
     }
 }
 

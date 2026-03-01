@@ -12,7 +12,10 @@ import { useNotifications } from "@/hooks/useNotifications";
 import { useIncidents } from "@/hooks/useIncidents";
 
 import { useContainers } from "@/hooks/useContainers";
+import { useHosts } from "@/hooks/useHosts";
 import { ContainerCard } from "@/components/dashboard/ContainerCard";
+import { HostSelector } from "@/components/dashboard/HostSelector";
+import { HostHealthCard } from "@/components/dashboard/HostHealthCard";
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { Skeleton } from "@/components/common/Skeleton";
 import { MetricsChartsSkeleton } from "@/components/dashboard/ChartSkeleton";
@@ -23,10 +26,13 @@ export default function DashboardPage() {
     const { metrics } = useMetrics();
     const { incidents, activeIncidentId, setActiveIncidentId } = useIncidents({ manual: true });
     const { containers, loading: containersLoading, restartContainer, refetch: refetchContainers } = useContainers({ manual: true });
+    const { hosts, loading: hostsLoading, refetch: refetchHosts } = useHosts({ manual: true });
+    const [selectedHostId, setSelectedHostId] = useState<string>('all');
 
     const handleRefresh = useCallback(() => {
         refetchContainers();
-    }, [refetchContainers]);
+        refetchHosts();
+    }, [refetchContainers, refetchHosts]);
 
     // Track initial load state (skeletons shown only on first load)
     const [initialLoad, setInitialLoad] = useState(true);
@@ -119,6 +125,30 @@ export default function DashboardPage() {
                         <p className="text-muted-foreground">Real-time overview of your system health and agent activities.</p>
                     </div>
 
+                    {/* Hosts Summary and Selector */}
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-card p-4 rounded-xl border border-border">
+                        <HostSelector
+                            hosts={hosts}
+                            selectedHostId={selectedHostId}
+                            onSelectHost={setSelectedHostId}
+                            isLoading={hostsLoading || isLoading}
+                        />
+                    </div>
+
+                    {/* Per-Host Health Cards */}
+                    {selectedHostId === 'all' && hosts.length > 0 && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                            {hosts.map(host => (
+                                <HostHealthCard key={host.id} host={host} />
+                            ))}
+                        </div>
+                    )}
+                    {selectedHostId !== 'all' && hosts.find(h => h.id === selectedHostId) && (
+                        <div className="mb-4">
+                            <HostHealthCard host={hosts.find(h => h.id === selectedHostId)!} />
+                        </div>
+                    )}
+
                     {/* Health Summary - Show skeleton during initial load */}
                     {isLoading ? (
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -183,13 +213,15 @@ export default function DashboardPage() {
                                         </span>
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        {containers.map(container => (
-                                            <ContainerCard
-                                                key={container.id}
-                                                container={container}
-                                                onRestart={restartContainer}
-                                            />
-                                        ))}
+                                        {containers
+                                            .filter(c => selectedHostId === 'all' || c.hostInfo?.id === selectedHostId)
+                                            .map(container => (
+                                                <ContainerCard
+                                                    key={container.id}
+                                                    container={container}
+                                                    onRestart={restartContainer}
+                                                />
+                                            ))}
                                     </div>
                                 </div>
                             )}
