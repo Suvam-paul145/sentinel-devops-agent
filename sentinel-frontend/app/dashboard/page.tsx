@@ -136,18 +136,24 @@ export default function DashboardPage() {
                     </div>
 
                     {/* Per-Host Health Cards */}
-                    {selectedHostId === 'all' && hosts.length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                            {hosts.map(host => (
-                                <HostHealthCard key={host.id} host={host} />
-                            ))}
-                        </div>
-                    )}
-                    {selectedHostId !== 'all' && hosts.find(h => h.id === selectedHostId) && (
-                        <div className="mb-4">
-                            <HostHealthCard host={hosts.find(h => h.id === selectedHostId)!} />
-                        </div>
-                    )}
+                    {(() => {
+                        if (selectedHostId === 'all' && hosts.length > 0) {
+                            return (
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                                    {hosts.map(host => <HostHealthCard key={host.id} host={host} />)}
+                                </div>
+                            );
+                        }
+                        const selectedHost = hosts.find(h => h.id === selectedHostId);
+                        if (selectedHost) {
+                            return (
+                                <div className="mb-4">
+                                    <HostHealthCard host={selectedHost} />
+                                </div>
+                            );
+                        }
+                        return null;
+                    })()}
 
                     {/* Health Summary - Show skeleton during initial load */}
                     {isLoading ? (

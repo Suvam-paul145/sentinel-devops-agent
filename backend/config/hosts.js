@@ -1,11 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 
+/**
+ * Dynamically resolves and decodes raw environment configs and hosts.json.
+ * @returns {Array} List of host configuration definitions
+ */
 function loadHostsConfig() {
     // 1. Check environment variable
     if (process.env.HOSTS_CONFIG) {
         try {
-            return JSON.parse(process.env.HOSTS_CONFIG);
+            const parsed = JSON.parse(process.env.HOSTS_CONFIG);
+            return parsed.hosts && Array.isArray(parsed.hosts) ? parsed.hosts : (Array.isArray(parsed) ? parsed : [parsed]);
         } catch (err) {
             console.error('Failed to parse HOSTS_CONFIG from environment:', err);
         }

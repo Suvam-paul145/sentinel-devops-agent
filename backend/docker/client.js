@@ -1,6 +1,9 @@
 const Docker = require('dockerode');
 const { Client } = require('ssh2');
 
+/**
+ * DockerHostManager manages multihost environment configurations and lifecycle.
+ */
 class DockerHostManager {
   constructor() {
     this.hosts = new Map();
@@ -23,24 +26,19 @@ class DockerHostManager {
           const url = new URL(hostDef.host.startsWith('tcp://') ? hostDef.host.replace('tcp://', 'http://') : hostDef.host);
           client = new Docker({ host: url.hostname, port: hostDef.port || url.port || 2376 });
         } else if (hostDef.type === 'ssh') {
-          sshClient = new Client();
           const sshUrl = new URL(hostDef.host.replace('ssh://', 'http://'));
-          const config = {
+          const sshOptions = {
+            agent: process.env.SSH_AUTH_SOCK
+          };
+          if (hostDef.privateKey) sshOptions.privateKey = hostDef.privateKey;
+          else if (hostDef.password) sshOptions.password = hostDef.password;
+
+          client = new Docker({
+            protocol: 'ssh',
             host: sshUrl.hostname,
             port: sshUrl.port || 22,
             username: sshUrl.username || 'root',
-          };
-          if (hostDef.privateKey) config.privateKey = hostDef.privateKey;
-          else if (hostDef.password) config.password = hostDef.password;
-          else config.agent = process.env.SSH_AUTH_SOCK;
-
-          client = await new Promise((resolve, reject) => {
-            sshClient.on('ready', () => {
-              sshClient.exec('docker system dial-stdio', (err, stream) => {
-                if (err) return reject(err);
-                resolve(new Docker({ promisedStream: () => Promise.resolve(stream) }));
-              });
-            }).on('error', reject).connect(config);
+            sshOptions
           });
         }
 
@@ -70,6 +68,11 @@ class DockerHostManager {
 
 const hostManager = new DockerHostManager();
 
+/**
+ * Retrieves containers mapped across all available hosts with rich metadata.
+ * @param {Object} filters Options applied to limit scope natively
+ * @returns {Promise<Array>}
+ */
 async function listContainers(filters = {}) {
   const connectedHosts = hostManager.getConnected();
   const results = await Promise.allSettled(
@@ -111,6 +114,10 @@ async function listContainers(filters = {}) {
     .flatMap(r => r.value);
 }
 
+/**
+ * Introspects health for container using a unified compoundID.
+ * @param {string} compoundId The id structured {host}:{containerId}
+ */
 async function getContainerHealth(compoundId) {
   try {
     const { hostId, containerId } = hostManager.parseId(compoundId);

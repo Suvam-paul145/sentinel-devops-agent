@@ -1,5 +1,5 @@
 import React from 'react';
-import { HostInfo } from './HostSelector';
+import { HostInfo } from '@/hooks/useHosts';
 
 interface HostHealthCardProps {
     host: HostInfo;
@@ -9,12 +9,12 @@ export const HostHealthCard: React.FC<HostHealthCardProps> = ({ host }) => {
     const isConnected = host.status === 'connected';
 
     return (
-        <div className={`p-4 rounded-xl border \${isConnected ? 'bg-card border-border' : 'bg-destructive/10 border-destructive/20'}`}>
+        <div className={`p-4 rounded-xl border ${isConnected ? 'bg-card border-border' : 'bg-destructive/10 border-destructive/20'}`}>
             <div className="flex items-center justify-between mb-4">
                 <div>
                     <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                         {host.label}
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium \${isConnected ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${isConnected ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                             {host.status === 'connected' ? 'Online' : 'Offline'}
                         </span>
                         {host.swarm && (
@@ -29,7 +29,7 @@ export const HostHealthCard: React.FC<HostHealthCardProps> = ({ host }) => {
                 <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground">Containers</span>
-                        <p className="text-xl font-bold">{host.containersRunning} <span className="text-sm font-normal text-muted-foreground">/ {host.containers}</span></p>
+                        <p className="text-xl font-bold">{host.containersRunning ?? '-'} <span className="text-sm font-normal text-muted-foreground">/ {host.containers ?? '-'}</span></p>
                     </div>
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground">Est. CPU</span>

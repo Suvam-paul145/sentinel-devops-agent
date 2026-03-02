@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
                     info.memoryLimit = dockerInfo.MemTotal;
                     info.ncpu = dockerInfo.NCPU;
 
-                    info.swarm = await isSwarmMode(host.client);
+                    info.swarm = dockerInfo.Swarm?.LocalNodeState === 'active';
                     if (info.swarm) {
                         info.swarmServices = await listSwarmServices(host.client);
                     }
@@ -59,6 +59,7 @@ router.get('/', async (req, res) => {
 
                 } catch (err) {
                     console.error(`Error gathering info for host ${host.id}:`, err);
+                    info.status = 'degraded';
                     info.error = err.message;
                 }
             }

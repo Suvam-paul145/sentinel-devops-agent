@@ -55,7 +55,13 @@ async function recreateContainer(compoundId) {
 
 async function scaleService(serviceName, replicas, hostId = 'local') {
     try {
-        const hostData = hostManager.get(hostId); // Typically swarm is host specific
+        let hostData = hostManager.get(hostId);
+        if (!hostData) {
+            const connected = hostManager.getConnected();
+            if (connected.length > 0) {
+                hostData = connected[0];
+            }
+        }
         if (!hostData || !hostData.client) throw new Error(`Host disconnected: ${hostId}`);
 
         const service = hostData.client.getService(serviceName);

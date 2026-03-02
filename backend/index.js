@@ -263,11 +263,6 @@ app.post('/api/docker/try-restart/:id', requireDockerAuth, validateId, async (re
   } catch (error) {
     res.status(500).json(ERRORS.ACTION_FAILED().toJSON());
   }
-  tracker.lastAttempt = now;
-  restartTracker.set(id, tracker);
-
-  const result = await healer.restartContainer(id);
-  res.json({ allowed: true, ...result });
 });
 
 app.post('/api/docker/restart/:id', requireDockerAuth, validateId, async (req, res) => {
@@ -304,54 +299,56 @@ app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScal
 let globalWsBroadcaster;
 
 const hostsConfig = loadHostsConfig();
-hostManager.loadHosts(hostsConfig).then(() => {
+
+(async () => {
+  await hostManager.loadHosts(hostsConfig);
   console.log(`🔗 Docker Host Manager initialized with ${hostsConfig.length} host(s)`);
-});
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Sentinel Backend running on http://0.0.0.0:${PORT}`);
-});
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Sentinel Backend running on http://0.0.0.0:${PORT}`);
+  });
 
-// Setup WebSocket
-globalWsBroadcaster = setupWebSocket(server);
-serviceMonitor.setWsBroadcaster(globalWsBroadcaster);
+  // Setup WebSocket
+  globalWsBroadcaster = setupWebSocket(server);
+  serviceMonitor.setWsBroadcaster(globalWsBroadcaster);
 
-// K8s Watcher Event Handling
-k8sWatcher.on('oom', (pod) => {
-  incidents.logActivity('alert', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) OOMKilled`);
-  if (globalWsBroadcaster) {
-    globalWsBroadcaster.broadcast('K8S_EVENT', {
-      type: 'OOM',
-      pod,
-      message: `Pod ${pod.name} was OOMKilled`
-    });
-  }
-});
+  // K8s Watcher Event Handling
+  k8sWatcher.on('oom', (pod) => {
+    incidents.logActivity('alert', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) OOMKilled`);
+    if (globalWsBroadcaster) {
+      globalWsBroadcaster.broadcast('K8S_EVENT', {
+        type: 'OOM',
+        pod,
+        message: `Pod ${pod.name} was OOMKilled`
+      });
+    }
+  });
 
-k8sWatcher.on('crashloop', (pod) => {
-  incidents.logActivity('warn', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) CrashLoopBackOff`);
-  if (globalWsBroadcaster) {
-    globalWsBroadcaster.broadcast('K8S_EVENT', {
-      type: 'CRASHLOOP',
-      pod,
-      message: `Pod ${pod.name} is in CrashLoopBackOff`
-    });
-  }
-});
+  k8sWatcher.on('crashloop', (pod) => {
+    incidents.logActivity('warn', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) CrashLoopBackOff`);
+    if (globalWsBroadcaster) {
+      globalWsBroadcaster.broadcast('K8S_EVENT', {
+        type: 'CRASHLOOP',
+        pod,
+        message: `Pod ${pod.name} is in CrashLoopBackOff`
+      });
+    }
+  });
 
-// Start watching default namespace by default (can be expanded via API)
-k8sWatcher.watchPods('default', (type, pod) => {
-  if (globalWsBroadcaster) {
-    globalWsBroadcaster.broadcast('K8S_POD_UPDATE', { type, pod });
-  }
-});
-k8sWatcher.watchEvents('default', (event) => {
-  if (globalWsBroadcaster) {
-    globalWsBroadcaster.broadcast('K8S_EVENT_STREAM', event);
-  }
-});
+  // Start watching default namespace by default (can be expanded via API)
+  k8sWatcher.watchPods('default', (type, pod) => {
+    if (globalWsBroadcaster) {
+      globalWsBroadcaster.broadcast('K8S_POD_UPDATE', { type, pod });
+    }
+  });
+  k8sWatcher.watchEvents('default', (event) => {
+    if (globalWsBroadcaster) {
+      globalWsBroadcaster.broadcast('K8S_EVENT_STREAM', event);
+    }
+  });
 
 
-// Start Monitoring
-serviceMonitor.startMonitoring();
-startCollectors(); // Start Prometheus collectors
+  // Start Monitoring
+  serviceMonitor.startMonitoring();
+  startCollectors(); // Start Prometheus collectors
+})(); // End of server start IIFE

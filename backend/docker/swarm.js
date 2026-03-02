@@ -1,5 +1,8 @@
-const { hostManager } = require('./client');
-
+/**
+ * Introspects if the provided Docker client is functioning as a Swarm manager/worker.
+ * @param {Object} dockerClient Active Dockerode client target
+ * @returns {Promise<boolean>} True if swarm mode is active
+ */
 async function isSwarmMode(dockerClient) {
     try {
         const info = await dockerClient.info();
@@ -9,6 +12,11 @@ async function isSwarmMode(dockerClient) {
     }
 }
 
+/**
+ * Fetches configured Swarm services running on the cluster.
+ * @param {Object} dockerClient Active Dockerode client target 
+ * @returns {Promise<Array>} List of swarm services mapping ID, Name, Replicas, Image and State
+ */
 async function listSwarmServices(dockerClient) {
     try {
         const services = await dockerClient.listServices();

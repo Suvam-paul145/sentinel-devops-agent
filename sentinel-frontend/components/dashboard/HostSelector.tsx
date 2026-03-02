@@ -1,21 +1,5 @@
 import React from 'react';
-
-export interface HostInfo {
-    id: string;
-    label: string;
-    type: string;
-    status: string;
-    error?: string;
-    containers?: number;
-    containersRunning?: number;
-    memoryLimit?: number;
-    ncpu?: number;
-    swarm?: boolean;
-    aggregatedMetrics?: {
-        cpu: string;
-        memoryPercent: string;
-    }
-}
+import { HostInfo } from '@/hooks/useHosts';
 
 interface HostSelectorProps {
     hosts: HostInfo[];

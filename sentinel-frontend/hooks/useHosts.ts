@@ -1,6 +1,22 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-import { HostInfo } from '@/components/dashboard/HostSelector';
+
+export interface HostInfo {
+    id: string;
+    label: string;
+    type: string;
+    status: string;
+    error?: string;
+    containers?: number;
+    containersRunning?: number;
+    memoryLimit?: number;
+    ncpu?: number;
+    swarm?: boolean;
+    aggregatedMetrics?: {
+        cpu: string;
+        memoryPercent: string;
+    }
+}
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
