@@ -33,11 +33,11 @@ export const HostHealthCard: React.FC<HostHealthCardProps> = ({ host }) => {
                     </div>
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground">Est. CPU</span>
-                        <p className="text-xl font-bold">{host.aggregatedMetrics?.cpu}%</p>
+                        <p className="text-xl font-bold">{host.aggregatedMetrics?.cpu ?? '-'}%</p>
                     </div>
                     <div className="space-y-1">
                         <span className="text-sm text-muted-foreground">Est. Mem</span>
-                        <p className="text-xl font-bold">{host.aggregatedMetrics?.memoryPercent}%</p>
+                        <p className="text-xl font-bold">{host.aggregatedMetrics?.memoryPercent ?? '-'}%</p>
                     </div>
                 </div>
             ) : (

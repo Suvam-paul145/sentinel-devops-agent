@@ -15,8 +15,9 @@ export const HostSelector: React.FC<HostSelectorProps> = ({ hosts, selectedHostI
 
     return (
         <div className="flex items-center gap-2">
-            <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">Target Host:</label>
+            <label htmlFor="host-select" className="text-sm font-medium text-muted-foreground whitespace-nowrap">Target Host:</label>
             <select
+                id="host-select"
                 value={selectedHostId}
                 onChange={(e) => onSelectHost(e.target.value)}
                 className="h-10 px-3 py-2 bg-background border border-input rounded-md text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 w-full md:w-64"

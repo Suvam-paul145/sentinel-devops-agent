@@ -1,4 +1,4 @@
-const { docker } = require('./client');
+const { hostManager } = require('./client');
 const store = require('../db/metrics-store');
 const { scanImage } = require('../security/scanner');
 
@@ -22,7 +22,7 @@ class ContainerMonitor {
         }
 
         try {
-            const container = docker.getContainer(containerId);
+            const container = hostData.client.getContainer(containerId);
             const data = await container.inspect();
             const imageId = data.Image;
 

@@ -655,7 +655,7 @@ const hostsConfig = loadHostsConfig();
     }
   });
 
-<<<<<<< HEAD
+
   k8sWatcher.on('crashloop', (pod) => {
     incidents.logActivity('warn', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) CrashLoopBackOff`);
     if (globalWsBroadcaster) {
@@ -684,15 +684,3 @@ const hostsConfig = loadHostsConfig();
   serviceMonitor.startMonitoring();
   startCollectors(); // Start Prometheus collectors
 })(); // End of server start IIFE
-=======
-k8sWatcher.on('crashloop', (pod) => {
-  incidents.logActivity('warn', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) CrashLoopBackOff`);
-  if (globalWsBroadcaster) {
-    globalWsBroadcaster.broadcast('K8S_EVENT', {
-      type: 'CRASHLOOP',
-      pod,
-      message: `Pod ${pod.name} is in CrashLoopBackOff`
-    });
-  }
-});
->>>>>>> 850077c8636677863b3a5d51aa349eb4cc2e3026
