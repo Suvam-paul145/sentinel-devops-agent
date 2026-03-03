@@ -70,9 +70,6 @@ const hostsRoutes = require('./routes/hosts.routes');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const { requireAuth } = require('./auth/middleware');
 
-// Distributed Traces Routes
-const traceRoutes = require('./routes/traces.routes');
-
 // Contact Routes
 const contactRoutes = require('./routes/contact.routes');
 
@@ -112,9 +109,6 @@ app.use('/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/roles', rolesRoutes);
 app.use('/api/hosts', hostsRoutes);
-
-// Distributed Traces Routes
-app.use('/api/traces', traceRoutes);
 
 // Contact Routes
 app.use('/api', contactRoutes);
