@@ -7,7 +7,7 @@ export interface ReasoningStep {
   type: 'investigation_started' | 'evidence_collected' | 'hypothesis_formed' | 'hypothesis_tested' | 'action_triggered' | 'action_completed' | 'conclusion_reached';
   description: string;
   confidence: number;
-  evidence?: Record<string, any>;
+  evidence?: Record<string, unknown>;
   ts: number;
   incidentId: string;
 }
@@ -59,7 +59,7 @@ export function useReasoningStream(
     }
   }, []);
 
-  const connectToStream = useCallback(() => {
+  const connectToStreamInternal = useCallback(() => {
     if (!incidentId || !enabled) return;
 
     // Clean up existing connection before starting a new one
@@ -106,7 +106,7 @@ export function useReasoningStream(
             
             if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = setTimeout(() => {
-              connectToStream();
+              connectToStreamInternal();
             }, delay);
           } else {
             setError('Max reconnection attempts reached. Please refresh the page.');
@@ -121,20 +121,23 @@ export function useReasoningStream(
     }
   }, [incidentId, enabled, getApiUrl]);
 
+  const connectToStream = useRef(connectToStreamInternal);
+  connectToStream.current = connectToStreamInternal;
+
   const reconnect = useCallback(() => {
     reconnectAttemptsRef.current = 0;
-    connectToStream();
-  }, [connectToStream]);
+    connectToStream.current();
+  }, []);
 
   useEffect(() => {
     if (incidentId && enabled) {
-      connectToStream();
+      connectToStream.current();
     }
 
     return () => {
       disconnect();
     };
-  }, [incidentId, enabled, connectToStream, disconnect]);
+  }, [incidentId, enabled, disconnect]);
 
   // Calculate current and max confidence
   const currentConfidence = steps.length > 0 ? steps[steps.length - 1].confidence : 0;

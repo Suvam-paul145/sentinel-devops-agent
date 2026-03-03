@@ -11,14 +11,22 @@ const router = express.Router();
  */
 router.get('/stream/:incidentId', (req, res) => {
   const { incidentId } = req.params;
-  const allowedOrigin = process.env.ALLOWED_ORIGINS || '*';
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',').map(o => o.trim());
+  const requestOrigin = req.get('Origin');
+  let allowedOrigin = allowedOrigins[0];
+  
+  if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+    allowedOrigin = requestOrigin;
+  } else if (allowedOrigins.includes('*')) {
+    allowedOrigin = '*';
+  }
 
   // Set SSE headers
   res.set({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': allowedOrigin !== '*' ? allowedOrigin : '*',
+    'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Credentials': 'true',

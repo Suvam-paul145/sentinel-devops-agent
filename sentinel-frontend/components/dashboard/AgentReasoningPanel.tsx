@@ -67,10 +67,10 @@ export function AgentReasoningPanel({
                         </h3>
                         <p className="text-xs text-muted-foreground">
                             Analysis ID: {incident.id} 
-                            {isConnected && liveStreamEnabled && (
-                                <span className="ml-2 inline-flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
-                                    Live streaming
+                            {liveStreamEnabled && (
+                                <span className={`ml-2 inline-flex items-center gap-1 transition-colors duration-300 ${isConnected ? 'text-green-400' : 'text-yellow-500'}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-green-400 animate-pulse' : 'bg-yellow-500'}`} />
+                                    {isConnected ? 'Live streaming' : isLoading ? 'Connecting...' : 'Disconnected'}
                                 </span>
                             )}
                         </p>

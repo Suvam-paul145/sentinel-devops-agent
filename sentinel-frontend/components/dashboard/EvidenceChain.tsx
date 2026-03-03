@@ -116,7 +116,7 @@ export function EvidenceChain({
       {displaySteps.length > 0 && (
         <div className="relative">
           {/* Vertical Line */}
-          <div className="absolute left-4 top-8 bottom-0 w-0.5 bg-gradient-to-b from-white/20 to-white/5" />
+          <div className="absolute left-4 top-8 bottom-0 w-0.5 bg-linear-to-b from-white/20 to-white/5" />
 
           {/* Steps */}
           <div className="space-y-4">

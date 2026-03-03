@@ -52,7 +52,7 @@ export function ConfidenceMeter({
   // Clamp values to [0, 1] for safety
   const confidence = Math.min(Math.max(rawConfidence, 0), 1);
   const maxConfidence = Math.min(Math.max(rawMaxConfidence, 0), 1);
-  const [displayConfidence, setDisplayConfidence] = useState(0);
+  const [displayConfidence, setDisplayConfidence] = useState(confidence);
 
   useEffect(() => {
     if (!animated) {
@@ -77,6 +77,7 @@ export function ConfidenceMeter({
 
   const pct = Math.round(displayConfidence * 100);
   const clampedPct = Math.min(Math.max(pct, 0), 100);
+  const maxPct = Math.round(maxConfidence * 100);
   const colorClass = getConfidenceColor(confidence);
   const bgColorClass = getConfidenceBgColor(confidence);
   const label = getConfidenceLabel(confidence);

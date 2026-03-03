@@ -58,15 +58,19 @@ async function restartContainer(containerId) {
         const metrics = containerMonitor.getMetrics(containerId)?.raw || {};
         
         // Emit: Evidence collected - Metrics
+        const cpuHigh = metrics.cpuPercent > 80;
         emitReasoningSafe(incidentId, {
             type: 'evidence_collected',
-            description: `High CPU usage detected: ${metrics.cpuPercent?.toFixed(1)}% (threshold: 80%)`,
-            confidence: 0.3,
+            description: cpuHigh 
+                ? `High CPU usage detected: ${metrics.cpuPercent?.toFixed(1)}% (threshold: 80%)`
+                : `CPU usage within limits: ${metrics.cpuPercent?.toFixed(1)}% (threshold: 80%)`,
+            confidence: cpuHigh ? 0.3 : 0.1,
             evidence: {
                 metric: 'cpu_percent',
                 value: metrics.cpuPercent,
                 threshold: 80,
-                unit: '%'
+                unit: '%',
+                breached: cpuHigh
             }
         });
 
@@ -352,7 +356,7 @@ async function scaleService(serviceName, replicas) {
         const service = docker.getService(serviceName);
         const info = await service.inspect();
         const version = info.Version.Index;
-        const currentReplicas = info.Spec.Mode?.Replicated?.Replicas || 1;
+        const currentReplicas = info.Spec.Mode?.Replicated?.Replicas ?? 1;
 
         emitReasoningSafe(incidentId, {
             type: 'evidence_collected',
