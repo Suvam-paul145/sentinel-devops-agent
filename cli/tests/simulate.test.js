@@ -14,10 +14,14 @@ jest.unstable_mockModule('../src/api.js', () => ({
 }));
 
 // Import after mocking
-const { runAction } = await import('../src/commands.js');
+let runAction;
 
 describe('sentinel simulate', () => {
     let consoleCapture;
+
+    beforeAll(async () => {
+        ({ runAction } = await import('../src/commands.js'));
+    });
 
     beforeEach(() => {
         consoleCapture = new ConsoleCapture();

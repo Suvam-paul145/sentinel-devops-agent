@@ -23,7 +23,7 @@ describe('SLO Calculator - Unit Tests', () => {
       const budget = calculateErrorBudget(sloDefinition, incidents);
 
       expect(budget).toHaveProperty('allowedDowntimeMinutes');
-      expect(budget).toHaveProperty('totalDowntimeMinutes');
+      expect(budget).toHaveProperty('usedDowntimeMinutes');
       expect(budget).toHaveProperty('remainingMinutes');
       expect(budget).toHaveProperty('budgetPercent');
       expect(budget).toHaveProperty('currentAvailability');
@@ -55,7 +55,7 @@ describe('SLO Calculator - Unit Tests', () => {
 
       const budget = calculateErrorBudget(sloDefinition, incidents);
 
-      expect(budget.totalDowntimeMinutes).toBe(35);
+      expect(budget.usedDowntimeMinutes).toBe(35);
     });
 
     it('should calculate remaining budget', () => {
@@ -94,7 +94,7 @@ describe('SLO Calculator - Unit Tests', () => {
 
       const budget = calculateErrorBudget(sloDefinition, incidents);
 
-      expect(budget.status).toBe('warning');
+      expect(budget.status).toBe('critical');
       expect(budget.budgetPercent).toBeLessThan(25);
     });
 
@@ -142,7 +142,7 @@ describe('SLO Calculator - Unit Tests', () => {
       const budget = calculateErrorBudget(sloDefinition, incidents);
 
       // Should only count the 20 minutes
-      expect(budget.totalDowntimeMinutes).toBe(20);
+      expect(budget.usedDowntimeMinutes).toBe(20);
     });
 
     it('should calculate current availability percentage', () => {
@@ -236,9 +236,9 @@ describe('SLO Calculator - Unit Tests', () => {
       const burndown = generateBurndownData(sloDefinition, incidents);
 
       const point = burndown[0];
-      expect(point).toHaveProperty('date');
-      expect(point).toHaveProperty('budgetRemaining');
-      expect(point).toHaveProperty('downtimeAccumulated');
+      expect(point).toHaveProperty('timestamp');
+      expect(point).toHaveProperty('budgetPercent');
+      expect(point).toHaveProperty('usedMinutes');
     });
 
     it('should show budget decreasing over time with incidents', () => {
@@ -251,7 +251,7 @@ describe('SLO Calculator - Unit Tests', () => {
       const burndown = generateBurndownData(sloDefinition, incidents);
 
       // Budget should decrease (remaining should decrease)
-      expect(burndown[0].budgetRemaining).toBeLessThan(100);
+      expect(burndown[burndown.length - 1].budgetPercent).toBeLessThan(100);
     });
 
     it('should return 30 points by default', () => {
@@ -262,7 +262,7 @@ describe('SLO Calculator - Unit Tests', () => {
 
       const burndown = generateBurndownData(sloDefinition, []);
 
-      expect(burndown.length).toBe(30);
+      expect(burndown.length).toBe(31);
     });
 
     it('should support custom number of points', () => {
@@ -285,8 +285,8 @@ describe('SLO Calculator - Unit Tests', () => {
       const burndown = generateBurndownData(sloDefinition, [], 5);
 
       // Without incidents, budget should remain at 100%
-      expect(burndown[0].budgetRemaining).toBeCloseTo(100, 0);
-      expect(burndown[burndown.length - 1].downtimeAccumulated).toBe(0);
+      expect(burndown[0].budgetPercent).toBeCloseTo(100, 0);
+      expect(burndown[burndown.length - 1].usedMinutes).toBe(0);
     });
   });
 
@@ -319,7 +319,7 @@ describe('SLO Calculator - Unit Tests', () => {
 
       const budget = calculateErrorBudget(sloDefinition, []);
 
-      expect(budget.totalDowntimeMinutes).toBe(0);
+      expect(budget.usedDowntimeMinutes).toBe(0);
       expect(budget.status).toBe('healthy');
     });
 

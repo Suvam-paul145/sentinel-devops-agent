@@ -10,6 +10,7 @@ export class ConsoleCapture {
     constructor() {
         this.logs = [];
         this.originalLog = console.log;
+        this.originalError = console.error;
     }
 
     start() {
@@ -19,10 +20,16 @@ export class ConsoleCapture {
                 typeof arg === 'string' ? arg : JSON.stringify(arg)
             ).join(' '));
         };
+        console.error = (...args) => {
+            this.logs.push(args.map(arg =>
+                typeof arg === 'string' ? arg : JSON.stringify(arg)
+            ).join(' '));
+        };
     }
 
     stop() {
         console.log = this.originalLog;
+        console.error = this.originalError;
     }
 
     getOutput() {

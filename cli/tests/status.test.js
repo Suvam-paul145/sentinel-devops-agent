@@ -14,10 +14,14 @@ jest.unstable_mockModule('../src/api.js', () => ({
 }));
 
 // Import after mocking
-const { showStatus } = await import('../src/commands.js');
+let showStatus;
 
 describe('sentinel status', () => {
     let consoleCapture;
+
+    beforeAll(async () => {
+        ({ showStatus } = await import('../src/commands.js'));
+    });
 
     beforeEach(() => {
         consoleCapture = new ConsoleCapture();
