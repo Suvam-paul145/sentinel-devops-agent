@@ -120,7 +120,7 @@ app.use('/api/traces', traceRoutes);
 app.use('/api', contactRoutes);
 
 // Reasoning Routes - AI Transparency
-app.use('/api/reasoning', reasoningRoutes);
+app.use('/api/reasoning', requireAuth, reasoningRoutes);
 
 // --- IN-MEMORY DATABASE ---
 let systemStatus = {

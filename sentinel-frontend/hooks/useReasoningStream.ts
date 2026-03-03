@@ -37,16 +37,21 @@ export function useReasoningStream(
   const [error, setError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
 
   const getApiUrl = useCallback(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || `${window.location.protocol}//${window.location.host}`;
+    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 
+      (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.host}` : '');
     return `${baseUrl}/api/reasoning/stream/${incidentId}`;
   }, [incidentId]);
 
   const disconnect = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
@@ -54,26 +59,13 @@ export function useReasoningStream(
     }
   }, []);
 
-  const reconnect = useCallback(() => {
-    if (isConnected || !incidentId || !enabled) return;
-    
-    if (reconnectAttemptsRef.current >= maxReconnectAttempts) {
-      setError('Max reconnection attempts reached. Please refresh the page.');
-      return;
-    }
-
-    reconnectAttemptsRef.current += 1;
-    setIsLoading(true);
-    
-    // Connect with exponential backoff
-    const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current - 1), 10000);
-    setTimeout(() => {
-      connectToStream();
-    }, delay);
-  }, [incidentId, enabled, isConnected]);
-
   const connectToStream = useCallback(() => {
     if (!incidentId || !enabled) return;
+
+    // Clean up existing connection before starting a new one
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
 
     try {
       setIsLoading(true);
@@ -81,48 +73,63 @@ export function useReasoningStream(
 
       const eventSource = new EventSource(getApiUrl());
 
-      eventSource.addEventListener('open', () => {
+      eventSource.onopen = () => {
         setIsConnected(true);
         setIsLoading(false);
         reconnectAttemptsRef.current = 0;
         console.log(`Connected to reasoning stream for incident ${incidentId}`);
-      });
+      };
 
-      eventSource.addEventListener('message', (event) => {
+      eventSource.onmessage = (event) => {
         try {
           const step = JSON.parse(event.data) as ReasoningStep;
-          setSteps((prev) => [...prev, step]);
+          setSteps((prev) => {
+            // Check if step already exists to prevent duplicates on reconnect
+            if (prev.some(s => s.step === step.step && s.ts === step.ts)) return prev;
+            return [...prev, step];
+          });
         } catch (e) {
           console.error('Failed to parse reasoning step:', e);
         }
-      });
+      };
 
-      eventSource.addEventListener('error', () => {
+      eventSource.onerror = () => {
         setIsConnected(false);
         setIsLoading(false);
         
         if (eventSource.readyState === EventSource.CLOSED) {
-          setError('Connection closed by server');
           eventSource.close();
-          reconnect();
+          
+          if (reconnectAttemptsRef.current < maxReconnectAttempts) {
+            reconnectAttemptsRef.current += 1;
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current - 1), 10000);
+            
+            if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = setTimeout(() => {
+              connectToStream();
+            }, delay);
+          } else {
+            setError('Max reconnection attempts reached. Please refresh the page.');
+          }
         }
-      });
+      };
 
       eventSourceRef.current = eventSource;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect to reasoning stream');
       setIsLoading(false);
-      reconnect();
     }
-  }, [incidentId, enabled, getApiUrl, reconnect]);
+  }, [incidentId, enabled, getApiUrl]);
+
+  const reconnect = useCallback(() => {
+    reconnectAttemptsRef.current = 0;
+    connectToStream();
+  }, [connectToStream]);
 
   useEffect(() => {
-    if (!incidentId || !enabled) {
-      disconnect();
-      return;
+    if (incidentId && enabled) {
+      connectToStream();
     }
-
-    connectToStream();
 
     return () => {
       disconnect();

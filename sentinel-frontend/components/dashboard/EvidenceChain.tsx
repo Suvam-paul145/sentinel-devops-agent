@@ -128,15 +128,23 @@ export function EvidenceChain({
                 </div>
 
                 {/* Card */}
-                <div
-                  className="bg-slate-900/30 border border-white/10 rounded-lg p-3 hover:border-white/20 transition-colors cursor-pointer"
+                <button
+                  type="button"
+                  className="w-full text-left bg-slate-900/30 border border-white/10 rounded-lg p-3 hover:border-white/20 transition-all focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
                   onClick={() => onExpandStep?.(step.step)}
+                  aria-expanded={expandedStepId === step.step}
+                  aria-label={`${getStepLabel(step.type)} step detail`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <h4 className="text-xs font-semibold text-white mb-1">
-                        {getStepLabel(step.type)}
-                      </h4>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="text-xs font-semibold text-white">
+                          {getStepLabel(step.type)}
+                        </h4>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/5 text-muted-foreground border border-white/10">
+                          Step {step.step}
+                        </span>
+                      </div>
                       <p className="text-xs text-muted-foreground line-clamp-2">{step.description}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -158,9 +166,11 @@ export function EvidenceChain({
 
                   {/* Expanded Evidence */}
                   {expandedStepId === step.step && (
-                    <EvidenceItem evidence={step.evidence} />
+                    <div className="mt-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <EvidenceItem evidence={step.evidence} />
+                    </div>
                   )}
-                </div>
+                </button>
               </div>
             ))}
           </div>

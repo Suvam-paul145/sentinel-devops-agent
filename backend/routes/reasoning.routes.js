@@ -11,15 +11,17 @@ const router = express.Router();
  */
 router.get('/stream/:incidentId', (req, res) => {
   const { incidentId } = req.params;
+  const allowedOrigin = process.env.ALLOWED_ORIGINS || '*';
 
   // Set SSE headers
   res.set({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': allowedOrigin !== '*' ? allowedOrigin : '*',
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
   });
 
   // Handle OPTIONS for CORS

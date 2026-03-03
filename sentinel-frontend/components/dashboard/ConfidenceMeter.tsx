@@ -42,13 +42,16 @@ const getConfidenceIcon = (confidence: number) => {
 };
 
 export function ConfidenceMeter({
-  confidence,
-  maxConfidence = confidence,
+  confidence: rawConfidence,
+  maxConfidence: rawMaxConfidence = rawConfidence,
   animated = true,
   size = 'md',
   showLabel = true,
   showDetails = false,
 }: ConfidenceMeterProps) {
+  // Clamp values to [0, 1] for safety
+  const confidence = Math.min(Math.max(rawConfidence, 0), 1);
+  const maxConfidence = Math.min(Math.max(rawMaxConfidence, 0), 1);
   const [displayConfidence, setDisplayConfidence] = useState(0);
 
   useEffect(() => {
@@ -57,12 +60,11 @@ export function ConfidenceMeter({
       return;
     }
 
-    const percent = Math.round(confidence * 100);
     const interval = setInterval(() => {
       setDisplayConfidence((prev) => {
         const target = confidence;
         const diff = target - prev;
-        if (Math.abs(diff) < 0.01) {
+        if (Math.abs(diff) < 0.001) {
           clearInterval(interval);
           return target;
         }
@@ -74,7 +76,7 @@ export function ConfidenceMeter({
   }, [confidence, animated]);
 
   const pct = Math.round(displayConfidence * 100);
-  const maxPct = Math.round(maxConfidence * 100);
+  const clampedPct = Math.min(Math.max(pct, 0), 100);
   const colorClass = getConfidenceColor(confidence);
   const bgColorClass = getConfidenceBgColor(confidence);
   const label = getConfidenceLabel(confidence);
@@ -100,7 +102,7 @@ export function ConfidenceMeter({
             <div
               className={`${sizeClasses[size]} rounded-full transition-all duration-300 ${bgColorClass} shadow-lg`}
               style={{
-                width: `${pct}%`,
+                width: `${clampedPct}%`,
                 boxShadow: `0 0 12px ${
                   confidence >= 0.8
                     ? 'rgba(239, 68, 68, 0.5)'

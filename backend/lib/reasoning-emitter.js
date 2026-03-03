@@ -5,6 +5,7 @@ class ReasoningEmitter extends EventEmitter {
     super();
     this.history = new Map(); // incidentId -> step[]
     this.maxHistorySize = 1000; // Keep last 1000 incidents in memory
+    this.maxStepsPerIncident = Number(process.env.REASONING_MAX_STEPS_PER_INCIDENT || 5000);
   }
 
   /**
@@ -28,7 +29,13 @@ class ReasoningEmitter extends EventEmitter {
       incidentId
     };
 
-    this.history.get(incidentId).push(fullStep);
+    const incidentSteps = this.history.get(incidentId);
+    incidentSteps.push(fullStep);
+    
+    // Bound per-incident step growth
+    if (incidentSteps.length > this.maxStepsPerIncident) {
+      incidentSteps.shift();
+    }
 
     // Emit to specific incident listeners
     this.emit(`incident:${incidentId}`, fullStep);

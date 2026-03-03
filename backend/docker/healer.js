@@ -7,6 +7,14 @@ const { storeIncident, findSimilar } = require('../db/incident-memory');
 const containerMonitor = require('./monitor');
 const reasoningEmitter = require('../lib/reasoning-emitter');
 
+function emitReasoningSafe(incidentId, step) {
+    try {
+        reasoningEmitter.emit_step(incidentId, step);
+    } catch (err) {
+        console.warn(`Reasoning emit failed for ${incidentId}:`, err?.message || err);
+    }
+}
+
 async function performSecurityPrecheck(containerId) {
     try {
         const container = docker.getContainer(containerId);
@@ -39,7 +47,7 @@ async function restartContainer(containerId) {
         containerName = info.Name.replace(/^\//, '');
 
         // Emit: Investigation started
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'investigation_started',
             description: `Started investigating container: ${containerName}`,
             confidence: 0.0
@@ -50,7 +58,7 @@ async function restartContainer(containerId) {
         const metrics = containerMonitor.getMetrics(containerId)?.raw || {};
         
         // Emit: Evidence collected - Metrics
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'evidence_collected',
             description: `High CPU usage detected: ${metrics.cpuPercent?.toFixed(1)}% (threshold: 80%)`,
             confidence: 0.3,
@@ -63,7 +71,7 @@ async function restartContainer(containerId) {
         });
 
         if (metrics.memPercent > 85) {
-            reasoningEmitter.emit_step(incidentId, {
+            emitReasoningSafe(incidentId, {
                 type: 'evidence_collected',
                 description: `High memory usage detected: ${metrics.memPercent?.toFixed(1)}% (threshold: 85%)`,
                 confidence: 0.35,
@@ -77,7 +85,7 @@ async function restartContainer(containerId) {
         }
 
         if (info.RestartCount > 0) {
-            reasoningEmitter.emit_step(incidentId, {
+            emitReasoningSafe(incidentId, {
                 type: 'evidence_collected',
                 description: `Container has restarted ${info.RestartCount} time(s) recently`,
                 confidence: 0.4,
@@ -104,7 +112,7 @@ async function restartContainer(containerId) {
         if (similarIncidents.length > 0) {
             console.log(`[Operational Memory] Found ${similarIncidents.length} similar incidents for ${containerName}. Top match resolved by: ${similarIncidents[0].resolution}`);
             
-            reasoningEmitter.emit_step(incidentId, {
+            emitReasoningSafe(incidentId, {
                 type: 'hypothesis_formed',
                 description: `Historical pattern match: Similar incident resolved by "${similarIncidents[0].resolution}" in the past`,
                 confidence: 0.55,
@@ -115,7 +123,7 @@ async function restartContainer(containerId) {
                 }
             });
         } else {
-            reasoningEmitter.emit_step(incidentId, {
+            emitReasoningSafe(incidentId, {
                 type: 'hypothesis_formed',
                 description: 'No direct historical precedent found. Applying standard remediation protocol.',
                 confidence: 0.45,
@@ -127,7 +135,7 @@ async function restartContainer(containerId) {
         // -------------------------------
 
         // --- Security Check ---
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'hypothesis_tested',
             description: 'Validating security policies before remediation...',
             confidence: 0.5
@@ -138,7 +146,7 @@ async function restartContainer(containerId) {
              const errorMsg = securityCheck.error;
              console.error(errorMsg);
              
-             reasoningEmitter.emit_step(incidentId, {
+             emitReasoningSafe(incidentId, {
                 type: 'conclusion_reached',
                 description: `Security validation FAILED: ${errorMsg}`,
                 confidence: 0.95,
@@ -148,10 +156,10 @@ async function restartContainer(containerId) {
                 }
              });
              
-             return { action: 'restart', success: false, containerId, error: errorMsg, blocked: true };
+             return { action: 'restart', success: false, containerId, error: errorMsg, blocked: true, incidentId };
         }
         
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'hypothesis_tested',
             description: 'Security policies validated. Proceeding with container restart.',
             confidence: 0.75
@@ -159,7 +167,7 @@ async function restartContainer(containerId) {
         // ----------------------
 
         // Emit: Action triggered
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'action_triggered',
             description: `Initiating container restart with 10s timeout...`,
             confidence: 0.8,
@@ -172,7 +180,7 @@ async function restartContainer(containerId) {
         await container.restart({ t: 10 });
         
         // Emit: Action completed
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'action_completed',
             description: `Container restart successful. Monitoring for recovery...`,
             confidence: 0.9,
@@ -185,7 +193,7 @@ async function restartContainer(containerId) {
         // --- Store Incident Outcome ---
         const mttr = Math.floor((Date.now() - startTime) / 1000);
         
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'conclusion_reached',
             description: `Resolution complete. Container restart successful. MTTR: ${mttr}s`,
             confidence: 0.95,
@@ -212,7 +220,7 @@ async function restartContainer(containerId) {
     } catch (error) {
         console.error(`Failed to restart container ${containerId}:`, error);
         
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'conclusion_reached',
             description: `Restart failed: ${error.message}`,
             confidence: 0.95,
@@ -232,14 +240,14 @@ async function recreateContainer(containerId) {
     try {
         const container = docker.getContainer(containerId);
         
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'investigation_started',
             description: `Started investigating container for recreation: ${containerId}`,
             confidence: 0.0
         });
         
         // --- Security Check ---
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'hypothesis_tested',
             description: 'Validating security policies before resource recreation...',
             confidence: 0.5
@@ -250,17 +258,17 @@ async function recreateContainer(containerId) {
              const errorMsg = securityCheck.error;
              console.error(errorMsg);
              
-             reasoningEmitter.emit_step(incidentId, {
+             emitReasoningSafe(incidentId, {
                 type: 'conclusion_reached',
                 description: `Security validation FAILED: ${errorMsg}`,
                 confidence: 0.95,
                 evidence: { securityCheck: 'blocked', reason: errorMsg }
              });
              
-             return { action: 'recreate', success: false, containerId, error: errorMsg, blocked: true };
+             return { action: 'recreate', success: false, containerId, error: errorMsg, blocked: true, incidentId };
         }
         
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'hypothesis_tested',
             description: 'Security policies validated. Proceeding with container recreation.',
             confidence: 0.75
@@ -269,7 +277,7 @@ async function recreateContainer(containerId) {
 
         const info = await container.inspect();
         
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'action_triggered',
             description: `Creating new container to replace ${info.Name.replace('/', '')}...`,
             confidence: 0.8,
@@ -294,7 +302,7 @@ async function recreateContainer(containerId) {
 
         await newContainer.start();
 
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'action_completed',
             description: `New container created and started. Removing old instance...`,
             confidence: 0.85,
@@ -310,7 +318,7 @@ async function recreateContainer(containerId) {
         // Rename new container to old name
         await newContainer.rename({ name: info.Name.replace('/', '') });
 
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'conclusion_reached',
             description: `Container recreation successful. Old instance removed and replaced.`,
             confidence: 0.95,
@@ -321,7 +329,7 @@ async function recreateContainer(containerId) {
     } catch (error) {
         console.error(`Failed to recreate container ${containerId}:`, error);
         
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'conclusion_reached',
             description: `Recreation failed: ${error.message}`,
             confidence: 0.95,
@@ -335,7 +343,7 @@ async function recreateContainer(containerId) {
 async function scaleService(serviceName, replicas) {
     const incidentId = `inc-${Date.now()}-${Math.floor(Math.random()*1000)}`;
     try {
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'investigation_started',
             description: `Analyzing service load for potential scaling: ${serviceName}`,
             confidence: 0.0
@@ -346,7 +354,7 @@ async function scaleService(serviceName, replicas) {
         const version = info.Version.Index;
         const currentReplicas = info.Spec.Mode?.Replicated?.Replicas || 1;
 
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'evidence_collected',
             description: `Current replica count: ${currentReplicas}, Target replicas: ${replicas}`,
             confidence: 0.3,
@@ -358,7 +366,7 @@ async function scaleService(serviceName, replicas) {
             }
         });
 
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'hypothesis_formed',
             description: `Load balancing intervention required. Scaling service to ${replicas} replicas...`,
             confidence: 0.7,
@@ -374,7 +382,7 @@ async function scaleService(serviceName, replicas) {
         if (!spec.Mode.Replicated) spec.Mode.Replicated = {};
         spec.Mode.Replicated.Replicas = parseInt(replicas, 10);
 
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'action_triggered',
             description: `Initiating scaling action to ${replicas} replicas...`,
             confidence: 0.8,
@@ -389,7 +397,7 @@ async function scaleService(serviceName, replicas) {
             ...spec
         });
 
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'conclusion_reached',
             description: `Service scaling completed successfully. ${replicas} replicas now active.`,
             confidence: 0.95,
@@ -404,7 +412,7 @@ async function scaleService(serviceName, replicas) {
     } catch (error) {
         console.error(`Failed to scale service ${serviceName}:`, error);
         
-        reasoningEmitter.emit_step(incidentId, {
+        emitReasoningSafe(incidentId, {
             type: 'conclusion_reached',
             description: `Scaling failed: ${error.message}`,
             confidence: 0.95,
