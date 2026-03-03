@@ -23,12 +23,16 @@ jest.unstable_mockModule('../src/api.js', () => ({
 }));
 
 // Import after mocking
-const { generateReport } = await import('../src/commands.js');
+let generateReport;
 
 describe('sentinel report', () => {
     let consoleCapture;
     let writtenContent = '';
     let writtenFileName = '';
+
+    beforeAll(async () => {
+        ({ generateReport } = await import('../src/commands.js'));
+    });
 
     beforeEach(() => {
         consoleCapture = new ConsoleCapture();

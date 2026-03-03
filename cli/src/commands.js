@@ -8,11 +8,11 @@ const { ERRORS } = errorsModule;
 
 const printError = (err) => {
     if (err && err.name === 'SentinelError') {
-        console.error('\n' + chalk.bold('Message: ') + err.message);
+        console.error('\n' + chalk.bold('Failed: ') + err.message);
         console.error(chalk.bold('Reason: ') + err.reason);
         console.error(chalk.bold('Solution: ') + err.solution + '\n');
     } else {
-        console.error('\n' + chalk.bold('Message: ') + (err?.message || 'Unknown error occurred.') + '\n');
+        console.error('\n' + chalk.bold('Failed: ') + (err?.message || 'Unknown error occurred.') + '\n');
     }
 };
 
@@ -28,40 +28,39 @@ export const showStatus = async () => {
 
         console.log(chalk.bold.cyan('\nSentinel System Status'));
 
-    // Added 'Last Updated' column to show per-service update timestamp
-    const table = new Table({
-        head: [chalk.white('Service'), chalk.white('Status'), chalk.white('Code')],
-        style: { head: [], border: [] }
-    });
+        const table = new Table({
+            head: [chalk.white('Service'), chalk.white('Status'), chalk.white('Code')],
+            style: { head: [], border: [] }
+        });
 
-    const services = data.services || {};
+        const services = data.services || {};
+        Object.keys(services).forEach(name => {
+            const s = services[name] || {};
+            const code = Number(s.code ?? 0);
+            let statusColor = chalk.green;
+            let statusText = 'HEALTHY';
 
-    Object.keys(services).forEach(name => {
-        const s = services[name] || {};
-        const code = Number(s.code ?? 0);
-        let statusColor = chalk.green;
-        let statusText = 'HEALTHY';
+            if (code >= 500) {
+                statusColor = chalk.red;
+                statusText = 'CRITICAL';
+            } else if (code >= 400 && code < 500) {
+                statusColor = chalk.yellow;
+                statusText = 'DEGRADED';
+            } else if (code === 0) {
+                statusColor = chalk.gray;
+                statusText = 'UNKNOWN';
+            } else if (code >= 200 && code < 300) {
+                statusColor = chalk.green;
+                statusText = 'HEALTHY';
+            } else {
+                statusColor = chalk.yellow;
+                statusText = 'DEGRADED';
+            }
 
-        if (code >= 500) {
-            statusColor = chalk.red;
-            statusText = 'CRITICAL';
-        } else if (code >= 400 && code < 500) {
-            statusColor = chalk.yellow;
-            statusText = 'DEGRADED';
-        } else if (code === 0) {
-            statusColor = chalk.gray;
-            statusText = 'UNKNOWN';
-        } else if (code >= 200 && code < 300) {
-            statusColor = chalk.green;
-            statusText = 'HEALTHY';
-        } else {
-            statusColor = chalk.yellow;
-            statusText = 'DEGRADED';
-        }
+            table.push([name.toUpperCase(), statusColor(statusText), code]);
+        });
 
-        console.log(chalk.bold.cyan('\nSentinel System Status'));
-
-    console.log(table.toString());
+        console.log(table.toString());
         if (data.lastUpdated) {
             console.log(chalk.gray(`Last Updated: ${new Date(data.lastUpdated).toLocaleString()}`));
         }
@@ -117,8 +116,7 @@ export const generateReport = async () => {
                 healthyStart = item.timestamp;
             }
             lastStatus = 'healthy';
-        }
-    });
+        });
 
         // Generate report
         let mdContent = `# Sentinel Incident Report\n`;
@@ -186,6 +184,6 @@ export const generateReport = async () => {
         console.log(chalk.gray(`   ${incidents.length} incidents, ${healthyPeriods.length} recoveries documented`));
     } catch (err) {
         printError(err);
+        throw err;
     }
 };
-

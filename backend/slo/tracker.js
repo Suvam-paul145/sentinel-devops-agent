@@ -49,9 +49,13 @@ function getIncidents(serviceId, windowStart = 0) {
 function getAllIncidents() {
     const all = [];
     for (const [, events] of downtimeStore) {
-        all.push(...events);
+        for (const event of events) {
+            all.push({ event, idx: all.length });
+        }
     }
-    return all.sort((a, b) => b.resolvedAt - a.resolvedAt);
+    return all
+        .sort((a, b) => (b.event.resolvedAt - a.event.resolvedAt) || (b.idx - a.idx))
+        .map((entry) => entry.event);
 }
 
 /**
