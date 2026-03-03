@@ -10,6 +10,46 @@ const axios = require('axios');
 const { listContainers, getContainerHealth } = require('./docker/client');
 const containerMonitor = require('./docker/monitor');
 const healer = require('./docker/healer');
+<<<<<<< HEAD
+=======
+const { routeEvent } = require('./config/notifications');
+const { loadServicesConfig, getAllServices, getClusterIds } = require('./config/services');
+
+const pendingApprovals = new Map();
+
+function executeHealing(incident) {
+  logActivity('info', `Executing healing for incident ${incident.id}`);
+  routeEvent('healing.started', incident);
+
+  setTimeout(() => {
+    logActivity('success', `Healing completed for incident ${incident.id}`);
+    routeEvent('healing.completed', incident);
+  }, 6000); // Simulate healing duration
+}
+
+function initiateHealingProtocol(incident) {
+  const incidentId = String(incident.id);
+  const configuredTimeout = Number(process.env.AUTO_HEAL_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
+    ? configuredTimeout
+    : 5 * 60 * 1000;
+  const timeout = setTimeout(() => {
+    const approval = pendingApprovals.get(incidentId);
+    if (approval) {
+      pendingApprovals.delete(incidentId);
+      logActivity('warn', `Timeout reached for ${incidentId}, auto-proceeding with healing.`);
+      executeHealing(incident);
+    }
+  }, timeoutMs); // Configurable auto-proceed timeout
+
+  pendingApprovals.set(incidentId, {
+    incident,
+    timeout
+  });
+
+  routeEvent('incident.detected', incident);
+}
+>>>>>>> 055cbc5 (feat(multi-cluster): Add multi-cluster service monitoring and remote agent support)
 
 // New Services
 const serviceMonitor = require('./services/monitor');
@@ -47,8 +87,41 @@ app.use('/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/slo', sloRoutes);
 app.use('/api/roles', rolesRoutes);
+<<<<<<< HEAD
 app.use('/api/kubernetes', kubernetesRoutes); // Kubernetes routes
 app.use('/', metricsRoutes); // Expose /metrics
+=======
+app.use('/api/hosts', hostsRoutes);
+
+// Distributed Traces Routes
+app.use('/api/traces', traceRoutes);
+
+// Contact Routes
+app.use('/api', contactRoutes);
+
+// --- IN-MEMORY DATABASE ---
+let activityLog = [];
+let aiLogs = [];
+let nextLogId = 1;
+
+function logActivity(type, message) {
+  const entry = {
+    id: nextLogId++,
+    timestamp: new Date().toISOString(),
+    type,
+    message
+  };
+  activityLog.unshift(entry);
+  if (activityLog.length > 100) activityLog.pop(); // Keep last 100
+  console.log(`[LOG] ${type}: ${message}`);
+
+  // Broadcast the new log entry to all connected WebSocket clients
+  wsBroadcaster.broadcast('ACTIVITY_LOG', entry);
+}
+
+// WebSocket Broadcaster
+let wsBroadcaster = { broadcast: () => { } };
+>>>>>>> 055cbc5 (feat(multi-cluster): Add multi-cluster service monitoring and remote agent support)
 
 // Smart Restart Tracking
 const restartTracker = new Map(); // containerId -> { attempts: number, lastAttempt: number }
@@ -61,12 +134,64 @@ app.get('/api/status', (req, res) => {
   res.json(serviceMonitor.getSystemStatus());
 });
 
+app.get('/api/services', (req, res) => {
+  res.json({ services: serviceMonitor.getAllServicesInfo() });
+});
+
+app.get('/api/clusters', (req, res) => {
+  const config = loadServicesConfig();
+  const clusters = getClusterIds(config).map(id => ({
+    id,
+    label: config.clusters[id].label,
+    region: config.clusters[id].region
+  }));
+  res.json({ clusters });
+});
+
 app.get('/api/activity', (req, res) => {
   res.json({ activity: incidents.getActivityLog().slice(0, 50) });
 });
 
 app.get('/api/insights', (req, res) => {
   res.json({ insights: incidents.getAiLogs().slice(0, 20) });
+});
+
+// --- REMOTE AGENT ENDPOINTS ---
+const AGENT_WEBHOOK_SECRET = process.env.AGENT_WEBHOOK_SECRET;
+
+function verifyAgentAuth(req, res, next) {
+  const agentSecret = req.headers['x-agent-secret'];
+  
+  if (!AGENT_WEBHOOK_SECRET) {
+    console.warn('AGENT_WEBHOOK_SECRET not configured, agent auth bypassed');
+    return next();
+  }
+  
+  if (!agentSecret || agentSecret !== AGENT_WEBHOOK_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid agent secret' });
+  }
+  
+  next();
+}
+
+app.post('/api/agent/metrics', verifyAgentAuth, (req, res) => {
+  const { clusterId, services, timestamp } = req.body;
+  
+  if (!clusterId || !services) {
+    return res.status(400).json({ error: 'Missing required fields: clusterId, services' });
+  }
+  
+  const success = serviceMonitor.handleAgentMetrics({
+    clusterId,
+    services,
+    timestamp: timestamp || new Date()
+  });
+  
+  if (success) {
+    res.json({ success: true, message: 'Metrics processed' });
+  } else {
+    res.status(400).json({ error: 'Failed to process metrics' });
+  }
 });
 
 app.post('/api/kestra-webhook', (req, res) => {
