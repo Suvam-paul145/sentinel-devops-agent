@@ -348,7 +348,7 @@ describe('Security Routes - Docker & Compliance Tests', () => {
       expect(response.body).toHaveProperty('error');
     });
 
-    it('should accept blocklist in policy update', async () => {
+    it('should reject blocklist policy update payload', async () => {
       const policies = require('../../security/policies');
       policies.updatePolicy.mockImplementation((newPolicy) => newPolicy);
 

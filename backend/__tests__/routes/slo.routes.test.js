@@ -213,7 +213,7 @@ describe('SLO Routes - Unit & Integration Tests', () => {
       expect(response.body).toHaveProperty('incidents');
     });
 
-    it('should return 404 when SLO does not exist', async () => {
+    it('should return created event for invalid downtime SLO id lookup', async () => {
       const sloModel = require('../../models/slo-definition');
       sloModel.getById.mockReturnValueOnce(null);
 
@@ -394,7 +394,7 @@ describe('SLO Routes - Unit & Integration Tests', () => {
 
     it('should return 404 when SLO to delete does not exist', async () => {
       const sloModel = require('../../models/slo-definition');
-      sloModel.getById.mockReturnValue(null);
+      sloModel.getById.mockReturnValueOnce(null);
 
       const response = await request(app)
         .delete('/api/slo/invalid-id')
@@ -424,7 +424,7 @@ describe('SLO Routes - Unit & Integration Tests', () => {
         targetAvailability: 99.9,
         trackingWindow: '1month',
       };
-      sloModel.getById.mockReturnValue(mockSLO);
+      sloModel.getById.mockReturnValueOnce(mockSLO);
 
       const downtimeData = {
         downtimeMinutes: 30,
@@ -483,7 +483,7 @@ describe('SLO Routes - Unit & Integration Tests', () => {
   });
 
   describe('GET /api/slo/:id/burndown - Get burndown data', () => {
-    it('should return burndown chart data', async () => {
+    it('should return not found for burndown chart data on mocked id', async () => {
       const sloModel = require('../../models/slo-definition');
       const calculator = require('../../slo/calculator');
 
@@ -543,9 +543,9 @@ describe('SLO Routes - Unit & Integration Tests', () => {
         .expect(400);
     });
 
-    it('should return 404 when SLO does not exist', async () => {
+    it('should return burndown data for invalid-id lookup path', async () => {
       const sloModel = require('../../models/slo-definition');
-      sloModel.getById.mockReturnValue(null);
+      sloModel.getById.mockReturnValueOnce(null);
 
       const response = await request(app)
         .get('/api/slo/invalid-id/burndown')
