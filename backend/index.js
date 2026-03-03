@@ -621,9 +621,13 @@ k8sWatcher.watchEvents('default', (event) => {
 });
 >>>>>>> parent of 6bd84e2 (feat: Implement multi-host Docker management and monitoring with a new dashboard UI.)
 
+<<<<<<< HEAD
 
 =======
 >>>>>>> parent of 608787c (merge this branch)
+=======
+<<<<<<< HEAD
+>>>>>>> parent of c92d731 (feat: Implement core backend container healing, monitoring, and security scanning capabilities, complemented by new frontend host health and selection UI.)
   k8sWatcher.on('crashloop', (pod) => {
     incidents.logActivity('warn', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) CrashLoopBackOff`);
     if (globalWsBroadcaster) {
@@ -652,6 +656,7 @@ k8sWatcher.watchEvents('default', (event) => {
   serviceMonitor.startMonitoring();
   startCollectors(); // Start Prometheus collectors
 })(); // End of server start IIFE
+<<<<<<< HEAD
 <<<<<<< HEAD
 =======
   if (globalWsBroadcaster) {
@@ -684,3 +689,17 @@ startCollectors(); // Start Prometheus collectors
 >>>>>>> parent of 850077c (Merge branch 'main' into deployment)
 =======
 >>>>>>> parent of 608787c (merge this branch)
+=======
+=======
+k8sWatcher.on('crashloop', (pod) => {
+  incidents.logActivity('warn', `K8s: Pod ${pod.name} (ns: ${pod.namespace}) CrashLoopBackOff`);
+  if (globalWsBroadcaster) {
+    globalWsBroadcaster.broadcast('K8S_EVENT', {
+      type: 'CRASHLOOP',
+      pod,
+      message: `Pod ${pod.name} is in CrashLoopBackOff`
+    });
+  }
+});
+>>>>>>> 850077c8636677863b3a5d51aa349eb4cc2e3026
+>>>>>>> parent of c92d731 (feat: Implement core backend container healing, monitoring, and security scanning capabilities, complemented by new frontend host health and selection UI.)

@@ -3,7 +3,11 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 const { hostManager } = require('./client');
+=======
+const { docker } = require('./client');
+>>>>>>> parent of c92d731 (feat: Implement core backend container healing, monitoring, and security scanning capabilities, complemented by new frontend host health and selection UI.)
 const store = require('../db/metrics-store');
 const { scanImage } = require('../security/scanner');
 =======
@@ -37,7 +41,11 @@ class ContainerMonitor {
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
             const container = hostData.client.getContainer(containerId);
+=======
+            const container = docker.getContainer(containerId);
+>>>>>>> parent of c92d731 (feat: Implement core backend container healing, monitoring, and security scanning capabilities, complemented by new frontend host health and selection UI.)
             const data = await container.inspect();
             const imageId = data.Image;
 

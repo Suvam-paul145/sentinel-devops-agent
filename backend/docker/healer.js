@@ -3,7 +3,11 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 const { hostManager } = require('./client');
+=======
+const { docker } = require('./client');
+>>>>>>> parent of c92d731 (feat: Implement core backend container healing, monitoring, and security scanning capabilities, complemented by new frontend host health and selection UI.)
 const { scanImage } = require('../security/scanner');
 const { checkCompliance } = require('../security/policies');
 const { logActivity } = require('../services/incidents');
@@ -11,13 +15,9 @@ const { generateFingerprint } = require('../lib/fingerprinting');
 const { storeIncident, findSimilar } = require('../db/incident-memory');
 const containerMonitor = require('./monitor');
 
-async function performSecurityPrecheck(compoundId) {
+async function performSecurityPrecheck(containerId) {
     try {
-        const { hostId, containerId } = hostManager.parseId(compoundId);
-        const hostData = hostManager.get(hostId);
-        if (!hostData || !hostData.client) return { blocked: true, error: `Host disconnected: ${hostId}` };
-
-        const container = hostData.client.getContainer(containerId);
+        const container = docker.getContainer(containerId);
         const info = await container.inspect();
         const imageId = info.Image;
         const scanResult = await scanImage(imageId);
@@ -36,34 +36,30 @@ async function performSecurityPrecheck(compoundId) {
     }
 }
 
-async function restartContainer(compoundId) {
+async function restartContainer(containerId) {
     const startTime = Date.now();
-    let containerName = compoundId;
-
+    let containerName = containerId;
+    
     try {
-        const { hostId, containerId } = hostManager.parseId(compoundId);
-        const hostData = hostManager.get(hostId);
-        if (!hostData || !hostData.client) throw new Error(`Host disconnected: ${hostId}`);
-
-        const container = hostData.client.getContainer(containerId);
+        const container = docker.getContainer(containerId);
         const info = await container.inspect();
         containerName = info.Name.replace(/^\//, '');
 
         // --- Memory / Fingerprinting ---
         // Get current metrics to add to fingerprint
-        const metrics = containerMonitor.getMetrics(compoundId)?.raw || {};
-
+        const metrics = containerMonitor.getMetrics(containerId)?.raw || {};
+        
         // Check for similar past incidents to log "AI awareness"
-        const preFingerprint = generateFingerprint({
-            containerName,
-            metrics: {
-                cpuPercent: metrics.cpuPercent,
-                memPercent: metrics.memPercent,
-                restartCount: info.RestartCount
+        const preFingerprint = generateFingerprint({ 
+            containerName, 
+            metrics: { 
+                cpuPercent: metrics.cpuPercent, 
+                memPercent: metrics.memPercent, 
+                restartCount: info.RestartCount 
             },
             logs: 'crash restart' // simulated log context
         });
-
+        
         const similarIncidents = findSimilar(preFingerprint);
         if (similarIncidents.length > 0) {
             console.log(`[Operational Memory] Found ${similarIncidents.length} similar incidents for ${containerName}. Top match resolved by: ${similarIncidents[0].resolution}`);
@@ -71,11 +67,11 @@ async function restartContainer(compoundId) {
         // -------------------------------
 
         // --- Security Check ---
-        const securityCheck = await performSecurityPrecheck(compoundId);
+        const securityCheck = await performSecurityPrecheck(containerId);
         if (securityCheck.blocked) {
-            const errorMsg = securityCheck.error;
-            console.error(errorMsg);
-            return { action: 'restart', success: false, containerId: compoundId, error: errorMsg, blocked: true };
+             const errorMsg = securityCheck.error;
+             console.error(errorMsg);
+             return { action: 'restart', success: false, containerId, error: errorMsg, blocked: true };
         }
         // ----------------------
 =======
@@ -91,11 +87,15 @@ async function restartContainer(compoundId) {
         const container = hostData.client.getContainer(containerId);
         await container.restart({ t: 10 });
 <<<<<<< HEAD
+<<<<<<< HEAD
 
+=======
+        
+>>>>>>> parent of c92d731 (feat: Implement core backend container healing, monitoring, and security scanning capabilities, complemented by new frontend host health and selection UI.)
         // --- Store Incident Outcome ---
         const mttr = Math.floor((Date.now() - startTime) / 1000);
         storeIncident({
-            id: `inc-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            id: `inc-${Date.now()}-${Math.floor(Math.random()*1000)}`,
             containerName,
             fingerprint: preFingerprint,
             summary: `Automated restart for ${containerName}`,
@@ -106,6 +106,7 @@ async function restartContainer(compoundId) {
         });
         // ------------------------------
 
+<<<<<<< HEAD
         return { action: 'restart', success: true, containerId: compoundId };
 =======
 const { docker } = require('./client');
@@ -158,6 +159,9 @@ async function restartContainer(compoundId) {
         await container.restart({ t: 10 });
         return { action: 'restart', success: true, containerId: compoundId };
 >>>>>>> parent of 608787c (merge this branch)
+=======
+        return { action: 'restart', success: true, containerId };
+>>>>>>> parent of c92d731 (feat: Implement core backend container healing, monitoring, and security scanning capabilities, complemented by new frontend host health and selection UI.)
     } catch (error) {
         console.error(`Failed to restart container ${containerId}:`, error);
         return { action: 'restart', success: false, containerId, error: error.message };
@@ -175,13 +179,13 @@ async function recreateContainer(containerId) {
         // Note: inspect is done inside performSecurityPrecheck, but recreate needs info later?
         // Ah, duplicate inspect is better than polluting logic.
         // Or reuse info? For now, keep it simple.
-
+        
         // --- Security Check ---
         const securityCheck = await performSecurityPrecheck(containerId);
         if (securityCheck.blocked) {
-            const errorMsg = securityCheck.error;
-            console.error(errorMsg);
-            return { action: 'recreate', success: false, containerId, error: errorMsg, blocked: true };
+             const errorMsg = securityCheck.error;
+             console.error(errorMsg);
+             return { action: 'recreate', success: false, containerId, error: errorMsg, blocked: true };
         }
         // ----------------------
 =======
