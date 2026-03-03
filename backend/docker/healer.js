@@ -1,6 +1,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 const { hostManager } = require('./client');
 const { scanImage } = require('../security/scanner');
 const { checkCompliance } = require('../security/policies');
@@ -130,6 +131,19 @@ async function restartContainer(compoundId) {
         await container.restart({ t: 10 });
         return { action: 'restart', success: true, containerId: compoundId };
 >>>>>>> parent of 850077c (Merge branch 'main' into deployment)
+=======
+const { hostManager } = require('./client');
+
+async function restartContainer(compoundId) {
+    try {
+        const { hostId, containerId } = hostManager.parseId(compoundId);
+        const hostData = hostManager.get(hostId);
+        if (!hostData || !hostData.client) throw new Error(`Host disconnected: ${hostId}`);
+
+        const container = hostData.client.getContainer(containerId);
+        await container.restart({ t: 10 });
+        return { action: 'restart', success: true, containerId: compoundId };
+>>>>>>> parent of 850077c (Merge branch 'main' into deployment)
     } catch (error) {
         console.error(`Failed to restart container ${containerId}:`, error);
         return { action: 'restart', success: false, containerId, error: error.message };
@@ -138,6 +152,7 @@ async function restartContainer(compoundId) {
 
 async function recreateContainer(containerId) {
     try {
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
         const container = docker.getContainer(containerId);
@@ -172,6 +187,15 @@ async function recreateContainer(containerId) {
 =======
 
 >>>>>>> parent of 608787c (merge this branch)
+=======
+        const { hostId, containerId } = hostManager.parseId(compoundId);
+        const hostData = hostManager.get(hostId);
+        if (!hostData || !hostData.client) throw new Error(`Host disconnected: ${hostId}`);
+
+        const container = hostData.client.getContainer(containerId);
+        const info = await container.inspect();
+
+>>>>>>> parent of 850077c (Merge branch 'main' into deployment)
 =======
         const { hostId, containerId } = hostManager.parseId(compoundId);
         const hostData = hostManager.get(hostId);
