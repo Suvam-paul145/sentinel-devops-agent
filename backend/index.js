@@ -251,8 +251,8 @@ const validateScaleParams = (req, res, next) => {
 app.get('/api/docker/containers', async (req, res) => {
   try {
     const containers = await listContainers();
-    // Use Promise.allSettled to handle monitoring setup concurrently without crashing
-    await Promise.allSettled(containers.map(c => monitor.startMonitoring(c.id)));
+    // Monitor initialization is now global and event-driven via monitor.init()
+    // No need to aggressively start monitoring on every list request
 
     // Enrich with smart restart meta
     const enrichedContainers = containers.map(c => {
@@ -335,8 +335,12 @@ app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScal
   res.json(result);
 });
 
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Sentinel Backend running on http://0.0.0.0:${PORT}`);
+// Initialize monitoring on startup
+monitor.init();
+
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Sentinel Backend running on port ${PORT}`);
+  console.log(`🔌 Docker Socket: ${process.env.DOCKER_SOCKET || (process.platform === 'win32' ? '//./pipe/docker_engine' : '/var/run/docker.sock')}`);
 });
 
 // Setup WebSocket

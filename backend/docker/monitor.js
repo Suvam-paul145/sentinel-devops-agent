@@ -3,59 +3,97 @@ const { docker } = require('./client');
 class ContainerMonitor {
     constructor() {
         this.metrics = new Map();
-        this.watchers = new Map();
+        this.pollingInterval = 30000; // 30 seconds default
+        this.isRunning = false;
+        this.timer = null;
     }
 
-    async startMonitoring(containerId) {
-        if (this.watchers.has(containerId)) return;
+    async init() {
+        if (this.isRunning) return;
+        this.isRunning = true;
 
+        console.log('🚀 Initializing Docker Event-Driven Monitor...');
+
+        // 1. Listen for Docker events (lifecycle management)
         try {
-            const container = docker.getContainer(containerId);
-            const stream = await container.stats({ stream: true });
+            const eventStream = await docker.getEvents({
+                filters: { type: ['container'], event: ['start', 'stop', 'die', 'destroy'] }
+            });
 
-            stream.on('data', (chunk) => {
+            eventStream.on('data', (chunk) => {
                 try {
-                    const stats = JSON.parse(chunk.toString());
-                    this.metrics.set(containerId, this.parseStats(stats));
+                    const event = JSON.parse(chunk.toString());
+                    const containerId = event.id;
+                    const action = event.action;
+
+                    if (action === 'start') {
+                        console.log(`📡 Container started: ${containerId.substring(0, 12)} - Refreshing metrics soon...`);
+                        // Immediate refresh for this container could be forced here
+                        setTimeout(() => this.pollSingle(containerId), 1000);
+                    } else if (['stop', 'die', 'destroy'].includes(action)) {
+                        console.log(`📡 Container stopped: ${containerId.substring(0, 12)} - Clearing metrics`);
+                        this.metrics.delete(containerId);
+                    }
                 } catch (e) {
                     // Ignore parse errors from partial chunks
                 }
             });
 
-            stream.on('error', (err) => {
-                console.error(`Stream error for ${containerId}:`, err);
-                this.stopMonitoring(containerId);
+            eventStream.on('error', (err) => {
+                console.error('❌ Docker event stream error:', err);
+                this.isRunning = false;
+                // Retry initialization after delay
+                setTimeout(() => this.init(), 5000);
             });
-
-            stream.on('end', () => {
-                this.stopMonitoring(containerId);
-            });
-
-            this.watchers.set(containerId, stream);
         } catch (error) {
-            console.error(`Failed to start monitoring ${containerId}:`, error);
+            console.error('❌ Failed to subscribe to Docker events:', error);
+        }
+
+        // 2. Start throttled metrics polling
+        this.startPolling();
+    }
+
+    startPolling() {
+        if (this.timer) clearInterval(this.timer);
+
+        // Initial poll
+        this.pollAll();
+
+        this.timer = setInterval(() => {
+            this.pollAll();
+        }, this.pollingInterval);
+    }
+
+    async pollAll() {
+        try {
+            const containers = await docker.listContainers({ all: false });
+            // Process in small batches or with slight delays if list is massive to prevent event loop blocking
+            for (const containerInfo of containers) {
+                await this.pollSingle(containerInfo.Id);
+            }
+        } catch (error) {
+            console.error('❌ Global poll failed:', error);
         }
     }
 
-    stopMonitoring(containerId) {
-        if (this.watchers.has(containerId)) {
-            const stream = this.watchers.get(containerId);
-            if (stream.destroy) stream.destroy();
-            this.watchers.delete(containerId);
+    async pollSingle(containerId) {
+        try {
+            const container = docker.getContainer(containerId);
+            // Fetch stats once (stream: false) to get current snapshot
+            const stats = await container.stats({ stream: false });
+            this.metrics.set(containerId, this.parseStats(stats));
+        } catch (error) {
+            // Container might have vanished between list and stats
             this.metrics.delete(containerId);
         }
     }
 
     parseStats(stats) {
-        // Calculate CPU percentage safely
         let cpuPercent = 0.0;
-
-        // Defensive read of nested properties
         const cpuUsage = stats.cpu_stats?.cpu_usage?.total_usage || 0;
         const preCpuUsage = stats.precpu_stats?.cpu_usage?.total_usage || 0;
         const systemCpuUsage = stats.cpu_stats?.system_cpu_usage || 0;
         const preSystemCpuUsage = stats.precpu_stats?.system_cpu_usage || 0;
-        // Default to 1 online cpu if missing to avoid division issues (stats often omit this on some platforms)
         const onlineCpus = stats.cpu_stats?.online_cpus || stats.cpu_stats?.cpu_usage?.percpu_usage?.length || 1;
 
         const cpuDelta = cpuUsage - preCpuUsage;
@@ -65,8 +103,6 @@ class ContainerMonitor {
             cpuPercent = (cpuDelta / systemDelta) * onlineCpus * 100;
         }
 
-        // Calculate memory percentage safely
-        // memory_stats might be missing or empty on some platforms/versions
         const memStats = stats.memory_stats || {};
         const memUsage = memStats.usage || 0;
         const memLimit = memStats.limit || 0;
@@ -96,7 +132,6 @@ class ContainerMonitor {
         const k = 1024;
         const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
-        // Clamp index to valid range
         const safeIndex = Math.min(Math.max(i, 0), sizes.length - 1);
         return parseFloat((bytes / Math.pow(k, safeIndex)).toFixed(2)) + ' ' + sizes[safeIndex];
     }
