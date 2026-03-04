@@ -184,17 +184,19 @@ const GRACE_PERIOD_MS = 60 * 1000; // 1 minute
 // Continuous health checking
 let isChecking = false;
 let isAnalyzing = false;
+let needsAnotherRun = false;
 
 /**
  * Performs root cause analysis in the background
  */
 async function analyzeSystemHealth() {
-  if (isAnalyzing) return;
-
-  const failingServices = Object.values(systemStatus.services).filter(s => s.status !== 'healthy');
-  if (failingServices.length === 0) return;
+  if (isAnalyzing) {
+    needsAnotherRun = true;
+    return;
+  }
 
   isAnalyzing = true;
+  needsAnotherRun = false;
   systemStatus.aiAnalysis = "Analyzing system health...";
   wsBroadcaster.broadcast('METRICS', systemStatus);
 
@@ -216,8 +218,14 @@ async function analyzeSystemHealth() {
     logActivity('info', 'AI Root Cause Analysis completed');
   } catch (error) {
     logActivity('error', `AI Analysis failed: ${error.message}`);
+    systemStatus.aiAnalysis = `AI Analysis failed: ${error.message}. Please check logs.`;
+    wsBroadcaster.broadcast('METRICS', systemStatus);
   } finally {
     isAnalyzing = false;
+    // If state changed during analysis, run again to capture latest context
+    if (needsAnotherRun) {
+      setTimeout(() => analyzeSystemHealth(), 1000);
+    }
   }
 }
 
