@@ -9,6 +9,7 @@ const axios = require('axios');
 const { listContainers, getContainerHealth } = require('./docker/client');
 const monitor = require('./docker/monitor');
 const healer = require('./docker/healer');
+const aiService = require('./ai');
 
 // RBAC Routes
 const authRoutes = require('./routes/auth.routes');
@@ -71,6 +72,43 @@ const GRACE_PERIOD_MS = 60 * 1000; // 1 minute
 
 // Continuous health checking
 let isChecking = false;
+let isAnalyzing = false;
+
+/**
+ * Performs root cause analysis in the background
+ */
+async function analyzeSystemHealth() {
+  if (isAnalyzing) return;
+
+  const failingServices = Object.values(systemStatus.services).filter(s => s.status !== 'healthy');
+  if (failingServices.length === 0) return;
+
+  isAnalyzing = true;
+  systemStatus.aiAnalysis = "Analyzing system health...";
+  wsBroadcaster.broadcast('METRICS', systemStatus);
+
+  try {
+    const report = await aiService.performAnalysis(systemStatus.services);
+    systemStatus.aiAnalysis = report;
+
+    const insight = {
+      id: Date.now(),
+      timestamp: new Date(),
+      analysis: report,
+      summary: report
+    };
+    aiLogs.unshift(insight);
+    if (aiLogs.length > 50) aiLogs.pop();
+
+    wsBroadcaster.broadcast('INCIDENT_NEW', insight);
+    wsBroadcaster.broadcast('METRICS', systemStatus);
+    logActivity('info', 'AI Root Cause Analysis completed');
+  } catch (error) {
+    logActivity('error', `AI Analysis failed: ${error.message}`);
+  } finally {
+    isAnalyzing = false;
+  }
+}
 
 async function checkServiceHealth() {
   if (isChecking) return;
@@ -127,6 +165,14 @@ async function checkServiceHealth() {
       systemStatus.lastUpdated = new Date();
       // Broadcast full metrics update
       wsBroadcaster.broadcast('METRICS', systemStatus);
+
+      // Trigger AI Analysis in the background if there are failures
+      const hasFailures = Object.values(systemStatus.services).some(s => s.status !== 'healthy');
+      if (hasFailures) {
+        analyzeSystemHealth().catch(err => {
+          logActivity('error', `Background AI Analysis trigger failed: ${err.message}`);
+        });
+      }
     }
   } finally {
     isChecking = false;
