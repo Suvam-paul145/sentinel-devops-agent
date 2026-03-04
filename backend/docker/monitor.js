@@ -1,9 +1,20 @@
 const { docker } = require('./client');
+const { scanImage } = require('../security/scanner');
+const EventEmitter = require('events');
+const metricsStore = require('../db/metrics-store');
+const { predictContainer } = require('./predictor');
 
-class ContainerMonitor {
+class ContainerMonitor extends EventEmitter {
     constructor() {
+        super();
         this.metrics = new Map();
         this.watchers = new Map();
+        this.lastStorePush = new Map();
+        this.securityTimers = new Map();
+        this.restartCounts = new Map();
+        this.containerNames = new Map();
+        this.lastInspectTimes = new Map();
+        this.lastPredictTimes = new Map();
     }
 
     async startMonitoring(containerId) {
@@ -11,16 +22,61 @@ class ContainerMonitor {
 
         try {
             const container = docker.getContainer(containerId);
+            const data = await container.inspect();
+            const imageId = data.Image;
+            
+            // Track initial restart count
+            this.restartCounts.set(containerId, data.RestartCount || 0);
+            // Track container name
+            this.containerNames.set(containerId, data.Name.replace(/^\//, ''));
+
             const stream = await container.stats({ stream: true });
 
-            stream.on('data', (chunk) => {
+            this.watchers.set(containerId, stream);
+
+            // Schedule periodic scans after successful stream setup
+            this.scheduleSecurityScan(containerId, imageId);
+
+            stream.on('data', async (chunk) => {
                 try {
                     const stats = JSON.parse(chunk.toString());
-                    this.metrics.set(containerId, this.parseStats(stats));
+                    const parsed = this.parseStats(stats);
+                    this.metrics.set(containerId, parsed);
+
+                    // Throttle inspect requests to every 30s to update restart counts
+                    const now = Date.now();
+                    const lastInspect = this.lastInspectTimes.get(containerId) || 0;
+                    
+                    if (now - lastInspect > 30000) {
+                        this.lastInspectTimes.set(containerId, now);  // guard before await
+                        try {
+                            const currentInfo = await container.inspect();
+                            this.restartCounts.set(containerId, currentInfo.RestartCount || 0);
+                        } catch (inspectError) {
+                            // Suppress transient inspect errors
+                        }
+                    }
+
+                    const lastPredict = this.lastPredictTimes.get(containerId) || 0;
+
+                    if (now - lastPredict > 5000) {
+                        metricsStore.push(containerId, { 
+                            cpuPercent: parsed.raw.cpuPercent, 
+                            memPercent: parsed.raw.memPercent, 
+                            restartCount: this.restartCounts.get(containerId) || 0 
+                        });
+
+                        const prediction = predictContainer(containerId);
+                        if (prediction && prediction.probability > 0.3) {
+                            this.emit('prediction', { ...prediction, containerName: this.containerNames.get(containerId) });
+                        }
+                        this.lastPredictTimes.set(containerId, now);
+                    }
                 } catch (e) {
                     // Ignore parse errors from partial chunks
                 }
             });
+
 
             stream.on('error', (err) => {
                 console.error(`Stream error for ${containerId}:`, err);
@@ -31,19 +87,43 @@ class ContainerMonitor {
                 this.stopMonitoring(containerId);
             });
 
-            this.watchers.set(containerId, stream);
+            // watchers.set was moved up
         } catch (error) {
             console.error(`Failed to start monitoring ${containerId}:`, error);
+            this.stopMonitoring(containerId); // Clean up any timers/watchers
         }
     }
 
     stopMonitoring(containerId) {
         if (this.watchers.has(containerId)) {
             const stream = this.watchers.get(containerId);
-            if (stream.destroy) stream.destroy();
+            if (stream && stream.destroy) stream.destroy();
             this.watchers.delete(containerId);
             this.metrics.delete(containerId);
+            this.lastStorePush.delete(containerId);
+            if (this.lastPredictTimes) this.lastPredictTimes.delete(containerId);
+            this.restartCounts.delete(containerId);
+            this.containerNames.delete(containerId);
+            this.lastInspectTimes.delete(containerId);
+            metricsStore.clear(containerId);
         }
+        if (this.securityTimers.has(containerId)) {
+            clearInterval(this.securityTimers.get(containerId));
+            this.securityTimers.delete(containerId);
+        }
+    }
+
+    scheduleSecurityScan(containerId, imageId) {
+        // Run scan immediately if not cached recently (scanner internally checks cache)
+        scanImage(imageId).catch(err => console.error(`[Security] Automated scan failed for ${containerId}:`, err.message));
+
+        // Schedule periodic scans (e.g., daily)
+        const interval = 24 * 60 * 60 * 1000;
+        const timer = setInterval(() => {
+            scanImage(imageId).catch(err => console.error(`[Security] Periodic scan failed for ${containerId}:`, err.message));
+        }, interval);
+
+        this.securityTimers.set(containerId, timer);
     }
 
     parseStats(stats) {
@@ -87,7 +167,12 @@ class ContainerMonitor {
                 rx: this.formatBytes(stats.networks?.eth0?.rx_bytes || 0),
                 tx: this.formatBytes(stats.networks?.eth0?.tx_bytes || 0)
             },
-            timestamp: new Date()
+            timestamp: new Date(),
+            raw: {
+                cpuPercent,
+                memPercent,
+                memLimit
+            }
         };
     }
 
