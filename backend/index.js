@@ -15,6 +15,10 @@ const authRoutes = require('./routes/auth.routes');
 const usersRoutes = require('./routes/users.routes');
 const rolesRoutes = require('./routes/roles.routes');
 
+// FinOps Routes & Collector
+const finopsRoutes = require('./finops/routes');
+const { startCollector: startFinOpsCollector } = require('./finops/metricsCollector');
+
 const app = express();
 const PORT = process.env.PORT || 4000;
 
@@ -26,6 +30,9 @@ app.use(bodyParser.json());
 app.use('/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/roles', rolesRoutes);
+
+// FinOps Routes
+app.use('/api/finops', finopsRoutes);
 
 // --- IN-MEMORY DATABASE ---
 let systemStatus = {
@@ -337,6 +344,8 @@ app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScal
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Sentinel Backend running on http://0.0.0.0:${PORT}`);
+  // Start FinOps metrics collector
+  startFinOpsCollector();
 });
 
 // Setup WebSocket

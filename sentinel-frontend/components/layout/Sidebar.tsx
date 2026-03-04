@@ -12,6 +12,7 @@ import {
     ChevronLeft,
     ChevronRight,
     BarChart3,
+    DollarSign,
     Menu,
     X,
 } from "lucide-react";
@@ -25,6 +26,7 @@ const navItems = [
     { name: "Services", href: "/dashboard/services", icon: Server },
     { name: "Incidents", href: "/dashboard/incidents", icon: Activity },
     { name: "Logs", href: "/dashboard/logs", icon: FileText },
+    { name: "FinOps", href: "/dashboard/finops", icon: DollarSign },
     { name: "Settings", href: "/dashboard/settings", icon: Settings },
     { name: "Terms", href: "/terms", icon: FileText },
 ];
