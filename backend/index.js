@@ -13,6 +13,7 @@ const axios = require('axios');
 const { listContainers, getContainerHealth } = require('./docker/client');
 const containerMonitor = require('./docker/monitor');
 const healer = require('./docker/healer');
+const { insertActivityLog, getActivityLogs, insertAIReport, getAIReports } = require('./db/logs');
 const { routeEvent } = require('./config/notifications');
 
 const pendingApprovals = new Map();
@@ -147,8 +148,11 @@ function logActivity(type, message) {
     message
   };
   activityLog.unshift(entry);
-  if (activityLog.length > 100) activityLog.pop(); // Keep last 100
+  if (activityLog.length > 100) activityLog.pop(); // Keep last 100 in memory
   console.log(`[LOG] ${type}: ${message}`);
+
+  // Persist to PostgreSQL (fire-and-forget)
+  insertActivityLog(type, message).catch(() => { });
 
   // Broadcast the new log entry to all connected WebSocket clients
   wsBroadcaster.broadcast('ACTIVITY_LOG', entry);
@@ -253,12 +257,28 @@ app.get('/api/status', (req, res) => {
   res.json(serviceMonitor.getSystemStatus());
 });
 
-app.get('/api/activity', (req, res) => {
-  res.json({ activity: incidents.getActivityLog().slice(0, 50) });
+app.get('/api/activity', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const offset = parseInt(req.query.offset) || 0;
+  try {
+    const { logs, total } = await getActivityLogs(limit, offset);
+    res.json({ activity: logs, total, limit, offset });
+  } catch (err) {
+    // Fallback to in-memory via incidents service
+    res.json({ activity: incidents.getActivityLog().slice(offset, offset + limit) });
+  }
 });
 
-app.get('/api/insights', (req, res) => {
-  res.json({ insights: incidents.getAiLogs().slice(0, 20) });
+app.get('/api/insights', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+  const offset = parseInt(req.query.offset) || 0;
+  try {
+    const { reports, total } = await getAIReports(limit, offset);
+    res.json({ insights: reports, total, limit, offset });
+  } catch (err) {
+    // Fallback to in-memory via incidents service
+    res.json({ insights: incidents.getAiLogs().slice(offset, offset + limit) });
+  }
 });
 
 app.post('/api/kestra-webhook', (req, res) => {
@@ -276,6 +296,9 @@ app.post('/api/kestra-webhook', (req, res) => {
     };
     aiLogs.unshift(insight);
     if (aiLogs.length > 50) aiLogs.pop();
+
+    // Persist to PostgreSQL (fire-and-forget)
+    insertAIReport(aiReport, aiReport).catch(() => { });
 
     logActivity('info', 'Received new AI Analysis report');
 
