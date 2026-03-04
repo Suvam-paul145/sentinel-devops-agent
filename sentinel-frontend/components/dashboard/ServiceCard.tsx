@@ -8,6 +8,7 @@ import { Button } from "@/components/common/Button";
 import { cn } from "@/lib/utils";
 import { Spotlight } from "@/components/common/Spotlight";
 import { Sparkline } from "@/components/common/Sparkline";
+import { PredictionBadge, Prediction } from "./PredictionBadge";
 
 const ServiceIcon = memo(({ type }: { type: Service["type"] }) => {
     switch (type) {
@@ -34,7 +35,7 @@ const StatusDot = memo(({ status }: { status: Service["status"] }) => {
 
 StatusDot.displayName = "StatusDot";
 
-export const ServiceCard = memo(function ServiceCard({ service }: { service: Service }) {
+export const ServiceCard = memo(function ServiceCard({ service, prediction }: { service: Service; prediction?: Prediction }) {
     return (
         <Spotlight className="p-5 bg-card border-border hover:border-primary/20 transition-all group">
             <div className="flex justify-between items-start mb-4">
@@ -53,6 +54,11 @@ export const ServiceCard = memo(function ServiceCard({ service }: { service: Ser
                 <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
                     <MoreHorizontal className="h-4 w-4" />
                 </Button>
+            </div>
+
+            {/* Prediction Badge */}
+            <div className="mb-3">
+                <PredictionBadge prediction={prediction} />
             </div>
 
             {service.description && (
