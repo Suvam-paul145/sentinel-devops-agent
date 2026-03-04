@@ -15,8 +15,14 @@ const WebSocketContext = createContext<WebSocketContextType | undefined>(undefin
 export function WebSocketProvider({ children }: { children: ReactNode }) {
     const { isConnected, lastMessage, sendMessage } = useWebSocket();
 
+    const value = React.useMemo(() => ({
+        isConnected,
+        lastMessage,
+        sendMessage
+    }), [isConnected, lastMessage, sendMessage]);
+
     return (
-        <WebSocketContext.Provider value={{ isConnected, lastMessage, sendMessage }}>
+        <WebSocketContext.Provider value={value}>
             {children}
         </WebSocketContext.Provider>
     );

@@ -1,5 +1,6 @@
 "use client";
 
+import React, { memo } from "react";
 import { Incident } from "@/lib/mockData";
 import { Brain, Check, GitBranch, Terminal } from "lucide-react";
 
@@ -8,7 +9,7 @@ interface AgentReasoningPanelProps {
     onClose?: () => void;
 }
 
-export function AgentReasoningPanel({ incident }: AgentReasoningPanelProps) {
+export const AgentReasoningPanel = memo(function AgentReasoningPanel({ incident }: AgentReasoningPanelProps) {
     // Parse the reasoning JSON if possible, otherwise use raw string
     let parsedReasoning: { choices?: { message?: { content?: string } }[], summary?: string } = {};
     let rawLog = "";
@@ -78,4 +79,6 @@ export function AgentReasoningPanel({ incident }: AgentReasoningPanelProps) {
             </div>
         </div>
     );
-}
+});
+
+AgentReasoningPanel.displayName = "AgentReasoningPanel";

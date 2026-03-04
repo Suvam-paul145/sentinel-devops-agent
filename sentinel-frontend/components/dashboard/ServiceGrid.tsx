@@ -1,10 +1,11 @@
 "use client";
 
+import React, { memo } from "react";
 import { Service } from "@/lib/mockData";
 import { ServiceCard } from "./ServiceCard";
 import { motion } from "framer-motion";
 
-export function ServiceGrid({ services }: { services: Service[] }) {
+export const ServiceGrid = memo(function ServiceGrid({ services }: { services: Service[] }) {
     return (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {services.map((service, index) => (
@@ -19,4 +20,6 @@ export function ServiceGrid({ services }: { services: Service[] }) {
             ))}
         </div>
     );
-}
+});
+
+ServiceGrid.displayName = "ServiceGrid";
