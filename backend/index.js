@@ -626,8 +626,9 @@ let globalWsBroadcaster;
 const hostsConfig = loadHostsConfig();
 
 (async () => {
-  await hostManager.loadHosts(hostsConfig);
-  console.log(`🔗 Docker Host Manager initialized with ${hostsConfig.length} host(s)`);
+  const hosts = hostsConfig || [];
+  await hostManager.loadHosts(hosts);
+  console.log(`🔗 Docker Host Manager initialized with ${hosts.length} host(s)`);
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Sentinel Backend running on http://0.0.0.0:${PORT}`);

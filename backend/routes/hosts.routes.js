@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { hostManager } = require('../docker/client');
-const { isSwarmMode, listSwarmServices } = require('../docker/swarm');
+const { listSwarmServices } = require('../docker/swarm');
 const containerMonitor = require('../docker/monitor');
 
 // GET /api/hosts
@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
                 label: host.label,
                 type: host.type,
                 status: host.status,
-                error: host.error,
+                error: host.error ? 'Host unavailable' : undefined,
             };
 
             if (host.status === 'connected' && host.client) {
@@ -60,7 +60,7 @@ router.get('/', async (req, res) => {
                 } catch (err) {
                     console.error(`Error gathering info for host ${host.id}:`, err);
                     info.status = 'degraded';
-                    info.error = err.message;
+                    info.error = 'Failed to gather host details';
                 }
             }
 
@@ -69,7 +69,8 @@ router.get('/', async (req, res) => {
 
         res.json({ hosts: hostsInfo });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Failed to fetch hosts:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
