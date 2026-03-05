@@ -213,6 +213,9 @@ async function analyzeSystemHealth() {
     aiLogs.unshift(insight);
     if (aiLogs.length > 50) aiLogs.pop();
 
+    // Persist to PostgreSQL (fire-and-forget)
+    insertAIReport(report, report).catch(() => { });
+
     wsBroadcaster.broadcast('INCIDENT_NEW', insight);
     wsBroadcaster.broadcast('METRICS', systemStatus);
     logActivity('info', 'AI Root Cause Analysis completed');
