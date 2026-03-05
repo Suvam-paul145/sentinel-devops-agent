@@ -18,7 +18,10 @@ export function useIncidents(options: { manual?: boolean } = {}) {
 
         if (lastMessage.type === "INCIDENT_NEW") {
             const newIncident = parseInsight(lastMessage.data as InsightPayload);
-            setIncidents((prev) => [newIncident, ...prev].slice(0, 50));
+            setIncidents((prev) => {
+                if (prev.some(i => i.id === newIncident.id)) return prev;
+                return [newIncident, ...prev].slice(0, 50);
+            });
         }
     }, [lastMessage]);
 
