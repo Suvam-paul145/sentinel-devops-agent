@@ -27,6 +27,7 @@ export function useHosts(options: { manual?: boolean } = {}) {
     const [error, setError] = useState<string | null>(null);
 
     const fetchHosts = useCallback(async () => {
+        setLoading(true);
         try {
             const response = await axios.get(`${API_BASE}/api/hosts`);
             setHosts(response.data.hosts);

@@ -1,14 +1,17 @@
 const Docker = require('dockerode');
+const { EventEmitter } = require('events');
 
 /**
  * DockerHostManager manages multihost environment configurations and lifecycle.
  */
-class DockerHostManager {
+class DockerHostManager extends EventEmitter {
   constructor() {
+    super();
     this.hosts = new Map();
   }
 
   async loadHosts(hostsConfig) {
+    this.emit('beforeHostsReload');
     for (const [id, hostData] of this.hosts.entries()) {
       if (hostData.sshClient) hostData.sshClient.end();
     }
@@ -48,6 +51,7 @@ class DockerHostManager {
         this.hosts.set(hostDef.id, { ...hostDef, client: null, status: 'disconnected', error: err.message });
       }
     }
+    this.emit('afterHostsReload');
   }
 
   getAll() { return [...this.hosts.values()]; }
@@ -55,13 +59,20 @@ class DockerHostManager {
   getConnected() { return this.getAll().filter(h => h.status === 'connected'); }
 
   parseId(compoundId) {
-    const parts = (compoundId || '').split(':');
+    const rawId = compoundId || '';
+    const parts = rawId.split(':');
     if (parts.length > 1) {
       return { hostId: parts[0], containerId: parts.slice(1).join(':') };
     }
-    const hosts = this.getConnected();
-    const hostId = hosts.length > 0 ? hosts[0].id : 'local';
-    return { hostId, containerId: compoundId };
+    const connected = this.getConnected();
+    if (connected.length === 0) {
+      // No hosts connected, fall back to 'local'
+      return { hostId: 'local', containerId: rawId };
+    }
+    if (connected.length === 1) {
+      return { hostId: connected[0].id, containerId: rawId };
+    }
+    throw new Error(`Ambiguous container id '${rawId}': multiple hosts connected. Use format '<hostId>:<containerId>' to specify target host.`);
   }
 }
 

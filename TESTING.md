@@ -177,9 +177,9 @@ See `backend/jest.config.js`:
 
 Target coverage (Phase 2 roadmap):
 
-- **Unit Tests**: 80%+ coverage ✅
-- **Integration Tests**: Critical paths covered ✅
-- **E2E Tests**: All healing scenarios validated ✅
+- **Unit Tests**: 80%+ coverage (in progress)
+- **Integration Tests**: Critical paths covered (in progress)
+- **E2E Tests**: All healing scenarios validated (in progress)
 
 ## Documentation
 

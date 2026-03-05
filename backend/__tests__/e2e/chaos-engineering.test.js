@@ -96,8 +96,10 @@ describe('E2E: Chaos Engineering', () => {
     // Verify backend is running
     const healthy = await isBackendHealthy();
     if (!healthy) {
-      console.warn('⚠️  Backend not running. E2E tests require running backend.');
-      console.warn('   Start backend: cd backend && npm start');
+      throw new Error(
+        'E2E prerequisite failed: backend not reachable at ' +
+          `${BACKEND_URL}. Start backend before running chaos tests.`
+      );
     }
   });
 
@@ -116,7 +118,8 @@ describe('E2E: Chaos Engineering', () => {
 
         // Step 2: Trigger service crash
         console.log(`🔥 Triggering crash on ${serviceName}...`);
-        await triggerServiceFailure(serviceName, 'crash');
+        const injected = await triggerServiceFailure(serviceName, 'crash');
+        expect(injected).toBe(true);
 
         // Step 3: Wait for service to be detected as unhealthy
         const becameUnhealthy = await waitForCondition(async () => {
@@ -148,7 +151,8 @@ describe('E2E: Chaos Engineering', () => {
 
         // Trigger degraded state
         console.log(`🐌 Triggering degraded state on ${serviceName}...`);
-        await triggerServiceFailure(serviceName, 'degraded');
+        const injected = await triggerServiceFailure(serviceName, 'degraded');
+        expect(injected).toBe(true);
 
         // Wait for detection
         const detected = await waitForCondition(async () => {
@@ -171,9 +175,10 @@ describe('E2E: Chaos Engineering', () => {
 
         // Trigger all failures at once
         console.log('🔥 Triggering multiple concurrent failures...');
-        await Promise.all(
+        const injections = await Promise.all(
           services.map((service) => triggerServiceFailure(service, 'crash'))
         );
+        expect(injections.every(Boolean)).toBe(true);
 
         // Wait for all to be detected as unhealthy
         const allUnhealthy = await waitForCondition(async () => {
@@ -214,6 +219,13 @@ describe('E2E: Chaos Engineering', () => {
           return;
         }
 
+        // Wait for service to become unhealthy first
+        const becameUnhealthy = await waitForCondition(async () => {
+          const status = await getServiceStatus('auth');
+          return status && status.status !== 'healthy';
+        }, 15000);
+        expect(becameUnhealthy).toBe(true);
+
         // Wait for recovery
         const recovered = await waitForCondition(async () => {
           const status = await getServiceStatus('auth');
@@ -229,8 +241,12 @@ describe('E2E: Chaos Engineering', () => {
 
   describe('Scenario 5: Activity Log Verification', () => {
     it('should log healing activities', async () => {
+      // Record trigger time for temporal correlation
+      const triggerTime = Date.now();
+      
       // Trigger a failure
-      await triggerServiceFailure('auth', 'crash');
+      const injected = await triggerServiceFailure('auth', 'crash');
+      expect(injected).toBe(true);
 
       // Wait a bit for logging
       await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -243,8 +259,15 @@ describe('E2E: Chaos Engineering', () => {
         expect(Array.isArray(activities)).toBe(true);
         expect(activities.length).toBeGreaterThan(0);
 
-        // Look for relevant log entries
-        const hasFailureLog = activities.some((log) =>
+        // Filter activities by timestamp to only check entries from this test
+        const relevantActivities = activities.filter(
+          (log) => new Date(log.timestamp).getTime() >= triggerTime
+        );
+
+        expect(relevantActivities.length).toBeGreaterThan(0);
+
+        // Look for relevant log entries in filtered activities
+        const hasFailureLog = relevantActivities.some((log) =>
           log.message.toLowerCase().includes('critical') ||
           log.message.toLowerCase().includes('down')
         );
@@ -267,7 +290,8 @@ describe('E2E: Chaos Engineering', () => {
         // Trigger 3 rapid failures
         console.log('🔥 Triggering rapid successive failures...');
         for (let i = 0; i < 3; i++) {
-          await triggerServiceFailure(serviceName, 'crash');
+          const injected = await triggerServiceFailure(serviceName, 'crash');
+          expect(injected).toBe(true);
           await new Promise((resolve) => setTimeout(resolve, 2000));
         }
 

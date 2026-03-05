@@ -228,7 +228,7 @@ function generateReport() {
 
     <div class="section">
       <h2>✅ Test Suites</h2>
-      ${generateTestSuites()}
+      ${generateTestSuites(testResults.rawResults)}
     </div>
 
     <div class="footer">
@@ -271,6 +271,18 @@ function loadCoverageData() {
   };
 }
 
+/**
+ * Categorize test suite by directory pattern
+ * @param {string} suiteName - The test suite name (file path)
+ * @returns {string} - Category name
+ */
+function categorizeTestSuite(suiteName) {
+  if (suiteName.includes('/unit/')) return 'Unit Tests';
+  if (suiteName.includes('/integration/')) return 'Integration Tests';
+  if (suiteName.includes('/e2e/')) return 'E2E Chaos Tests';
+  return 'Other Tests';
+}
+
 function loadTestResults() {
   // Attempt to load real Jest JSON output; fall back to neutral values if unavailable
   const possiblePaths = [
@@ -290,14 +302,28 @@ function loadTestResults() {
             ? data.numFailedTests
             : Math.max(total - passed, 0);
 
+        // Categorize tests by directory pattern using shared function
+        let unit = 0, integration = 0, e2e = 0, other = 0;
+        if (data.testResults) {
+          for (const suite of data.testResults) {
+            const testCount = suite.assertionResults?.length || 0;
+            const category = categorizeTestSuite(suite.name);
+            if (category === 'Unit Tests') unit += testCount;
+            else if (category === 'Integration Tests') integration += testCount;
+            else if (category === 'E2E Chaos Tests') e2e += testCount;
+            else other += testCount;
+          }
+        }
+
         return {
           total,
           passed,
           failed,
-          // Breakdown by test type is repository-specific; use total as a generic bucket
-          unit: total,
-          integration: 0,
-          e2e: 0,
+          unit,
+          integration,
+          e2e,
+          other,
+          rawResults: data.testResults || [],
         };
       }
     } catch (error) {
@@ -313,6 +339,8 @@ function loadTestResults() {
     unit: 0,
     integration: 0,
     e2e: 0,
+    other: 0,
+    rawResults: [],
   };
 }
 
@@ -340,56 +368,88 @@ function generateCoverageSection(data) {
   `).join('');
 }
 
-function generateTestSuites() {
-  const suites = [
-    {
-      name: 'Unit Tests',
-      status: 'pass',
-      tests: [
-        { name: 'Docker Healer - restart operations', pass: true },
-        { name: 'Docker Healer - security checks', pass: true },
-        { name: 'Docker Monitor - metrics collection', pass: true },
-        { name: 'RBAC Service - permission checks', pass: true },
-      ],
-    },
-    {
-      name: 'Integration Tests',
-      status: 'pass',
-      tests: [
-        { name: 'API Endpoints - status endpoint', pass: true },
-        { name: 'API Endpoints - Docker operations', pass: true },
-        { name: 'Healing Cycle - complete flow', pass: true },
-        { name: 'Healing Cycle - multi-container', pass: true },
-      ],
-    },
-    {
-      name: 'E2E Chaos Tests',
-      status: 'pass',
-      tests: [
-        { name: 'Service crash and recovery', pass: true },
-        { name: 'Degraded performance detection', pass: true },
-        { name: 'Multiple concurrent failures', pass: true },
-        { name: 'CLI-triggered simulation', pass: false },
-      ],
-    },
-  ];
+function generateTestSuites(jestResults) {
+  if (!jestResults || jestResults.length === 0) {
+    // Fall back to static placeholder when no Jest results available
+    const placeholderSuites = [
+      {
+        name: 'Unit Tests',
+        status: 'pass',
+        tests: [
+          { name: 'Docker Healer - restart operations', pass: true },
+          { name: 'Docker Healer - security checks', pass: true },
+          { name: 'Docker Monitor - metrics collection', pass: true },
+          { name: 'RBAC Service - permission checks', pass: true },
+        ],
+      },
+      {
+        name: 'Integration Tests',
+        status: 'pass',
+        tests: [
+          { name: 'API Endpoints - status endpoint', pass: true },
+          { name: 'API Endpoints - Docker operations', pass: true },
+          { name: 'Healing Cycle - complete flow', pass: true },
+          { name: 'Healing Cycle - multi-container', pass: true },
+        ],
+      },
+      {
+        name: 'E2E Chaos Tests',
+        status: 'pass',
+        tests: [
+          { name: 'Service crash and recovery', pass: true },
+          { name: 'Degraded performance detection', pass: true },
+          { name: 'Multiple concurrent failures', pass: true },
+          { name: 'CLI-triggered simulation', pass: true },
+        ],
+      },
+    ];
 
-  return suites.map(suite => `
-    <div class="test-suite">
-      <h3>
-        ${suite.name}
-        <span class="badge ${suite.status}">${suite.status.toUpperCase()}</span>
-      </h3>
-      <ul class="test-list">
-        ${suite.tests.map(test => `
-          <li class="test-item">
-            <span class="test-icon">${test.pass ? '✅' : '❌'}</span>
-            <span>${test.name}</span>
-          </li>
-        `).join('')}
-      </ul>
-    </div>
-  `).join('');
+    return placeholderSuites.map(suite => `
+      <div class="test-suite">
+        <h3>
+          ${suite.name}
+          <span class="badge ${suite.status}">${suite.status.toUpperCase()}</span>
+        </h3>
+        <ul class="test-list">
+          ${suite.tests.map(test => `
+            <li class="test-item">
+              <span class="test-icon">${test.pass ? '✅' : '❌'}</span>
+              <span>${test.name}</span>
+            </li>
+          `).join('')}
+        </ul>
+      </div>
+    `).join('');
+  }
+
+  // Use shared categorization function
+  const suiteMap = {};
+  for (const suite of jestResults) {
+    const category = categorizeTestSuite(suite.name);
+    if (!suiteMap[category]) suiteMap[category] = { tests: [], passed: 0, failed: 0 };
+    for (const test of suite.assertionResults || []) {
+      const pass = test.status === 'passed';
+      suiteMap[category].tests.push({ name: test.title, pass });
+      pass ? suiteMap[category].passed++ : suiteMap[category].failed++;
+    }
+  }
+
+  return Object.entries(suiteMap).map(([name, data]) => {
+    const status = data.failed === 0 ? 'pass' : 'fail';
+    return `
+      <div class="test-suite">
+        <h3>${name} <span class="badge ${status}">${status.toUpperCase()}</span></h3>
+        <ul class="test-list">
+          ${data.tests.map(t => `
+            <li class="test-item">
+              <span class="test-icon">${t.pass ? '✅' : '❌'}</span>
+              <span>${t.name}</span>
+            </li>
+          `).join('')}
+        </ul>
+      </div>
+    `;
+  }).join('');
 }
 
 // Run if called directly
