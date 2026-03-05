@@ -110,6 +110,16 @@ class ScalingPredictor extends EventEmitter {
         const metricsMap = this.monitor.metrics;
         if (!metricsMap || metricsMap.size === 0) return;
 
+        // Prune state for containers that are no longer monitored
+        const activeIds = new Set(metricsMap.keys());
+        for (const containerId of this.windows.keys()) {
+            if (!activeIds.has(containerId)) {
+                this.windows.delete(containerId);
+                this.predictions.delete(containerId);
+                this.containerNames.delete(containerId);
+            }
+        }
+
         for (const [containerId, metrics] of metricsMap.entries()) {
             if (!this.windows.has(containerId)) {
                 this.windows.set(containerId, new MetricsWindow(20));
@@ -123,36 +133,41 @@ class ScalingPredictor extends EventEmitter {
     }
 
     async evaluateAll() {
-        if (this.windows.size === 0) return;
+        if (this.isEvaluating || this.windows.size === 0) return;
+        this.isEvaluating = true;
 
-        const results = [];
+        try {
+            const results = [];
 
-        for (const [containerId, window] of this.windows.entries()) {
-            if (window.size() < 3) continue; // Need at least 3 samples
+            for (const [containerId, window] of this.windows.entries()) {
+                if (window.size() < 3) continue; // Need at least 3 samples
 
-            try {
-                const prediction = await this.evaluateContainer(containerId, window);
-                if (prediction) {
-                    this.predictions.set(containerId, prediction);
-                    results.push(prediction);
+                try {
+                    const prediction = await this.evaluateContainer(containerId, window);
+                    if (prediction) {
+                        this.predictions.set(containerId, prediction);
+                        results.push(prediction);
 
-                    // Emit event if above threshold
-                    if (prediction.failureProbability >= this.PREDICTION_THRESHOLD) {
-                        this.emit('scale-recommendation', prediction);
-                        console.log(`🔮 SCALE ALERT: ${prediction.containerName || containerId.substring(0, 12)} → ${Math.round(prediction.failureProbability * 100)}% failure risk`);
+                        // Emit event if above threshold
+                        if (prediction.failureProbability >= this.PREDICTION_THRESHOLD) {
+                            this.emit('scale-recommendation', prediction);
+                            console.log(`🔮 SCALE ALERT: ${prediction.containerName || containerId.substring(0, 12)} → ${Math.round(prediction.failureProbability * 100)}% failure risk`);
+                        }
                     }
+                } catch (err) {
+                    console.error(`Prediction error for ${containerId.substring(0, 12)}:`, err.message);
                 }
-            } catch (err) {
-                console.error(`Prediction error for ${containerId.substring(0, 12)}:`, err.message);
             }
-        }
 
-        // Broadcast all predictions to frontend
-        if (this.wsBroadcaster && results.length > 0) {
-            this.wsBroadcaster.broadcast('SCALE_PREDICTION', {
-                predictions: results,
-                evaluatedAt: new Date().toISOString()
-            });
+            // Broadcast all predictions to frontend
+            if (this.wsBroadcaster && results.length > 0) {
+                this.wsBroadcaster.broadcast('SCALE_PREDICTION', {
+                    predictions: results,
+                    evaluatedAt: new Date().toISOString()
+                });
+            }
+        } finally {
+            this.isEvaluating = false;
         }
     }
 

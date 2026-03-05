@@ -28,7 +28,7 @@ tasks:
   - id: check-critical
     type: io.kestra.plugin.core.flow.If
     condition: >
-      {{ outputs['get-predictions'].body | jq('.predictions[] | select(.failureProbability >= 0.75)') | length > 0 }}
+      {{ (outputs['get-predictions'].body ?? {}) | jq('.predictions[] | select(.failureProbability >= 0.75)') | length > 0 }}
     then:
       - id: log-critical-detected
         type: io.kestra.plugin.core.log.Log
@@ -53,7 +53,7 @@ tasks:
               },
               {
                 "role": "user",
-                "content": "Current predictions: {{ outputs['get-predictions'].body | jq('.predictions') | first | default('[]') }}. Which services should be scaled?"
+                "content": "Current predictions: {{ (outputs['get-predictions'].body ?? {}) | jq('.predictions') | default('[]') }}. Which services should be scaled?"
               }
             ],
             "temperature": 0.1,
@@ -65,6 +65,17 @@ tasks:
         message: |
           🤖 SCALING ADVISOR:
           {{ outputs['ai-scale-decision'].body | jq(".choices[0].message.content") | first | default("No AI response") }}
+
+      - id: execute-scaling
+        type: io.kestra.plugin.core.http.Request
+        uri: http://host.docker.internal:4000/api/docker/scale-bulk
+        method: POST
+        contentType: application/json
+        allowFailure: true
+        body: |
+          {
+            "aiDecision": {{ (outputs['ai-scale-decision'].body ?? {}) | jq(".choices[0].message.content") | first | default("[]") | json }}
+          }
 
     else:
       - id: log-no-risk
@@ -80,7 +91,7 @@ tasks:
     allowFailure: true
     body: |
       {
-        "aiReport": {{ outputs['ai-scale-decision'].body | jq(".choices[0].message.content") | first | default("\"Predictive scaling active - monitoring trends\"") | json }},
+        "aiReport": {{ (outputs['ai-scale-decision'].body ?? {}) | jq(".choices[0].message.content") | first | default("\"Predictive scaling active - monitoring trends\"") | json }},
         "metrics": {}
       }
 

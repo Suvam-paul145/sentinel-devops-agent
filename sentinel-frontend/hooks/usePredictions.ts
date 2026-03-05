@@ -53,8 +53,12 @@ export function usePredictions() {
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
             const res = await fetch(`${apiUrl}/predictions`);
+            if (!res.ok) {
+                console.error(`Predictions API error: ${res.status} ${res.statusText}`);
+                return;
+            }
             const data = await res.json();
-            if (data.predictions) {
+            if (data.predictions && Array.isArray(data.predictions)) {
                 setPredictionsArray(enrichPredictions(data.predictions));
                 setLastEvaluated(data.evaluatedAt);
             }
@@ -81,7 +85,7 @@ export function usePredictions() {
                 predictions: Prediction[];
                 evaluatedAt: string;
             };
-            if (data.predictions) {
+            if (data.predictions && Array.isArray(data.predictions)) {
                 setPredictionsArray(enrichPredictions(data.predictions));
                 setLastEvaluated(data.evaluatedAt);
             }

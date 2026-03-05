@@ -663,11 +663,47 @@ app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScal
   }
 });
 
+app.post('/api/docker/scale-bulk', requireDockerAuth, async (req, res) => {
+  try {
+    const aiDecisionStr = req.body.aiDecision;
+    let decisions = [];
+    if (typeof aiDecisionStr === 'string') {
+      try {
+        const match = aiDecisionStr.match(/\[.*\]/s);
+        decisions = JSON.parse(match ? match[0] : aiDecisionStr);
+      } catch (e) {
+        console.error('Failed to parse AI scale decisions', e);
+        return res.status(400).json({ success: false, error: 'Invalid AI payload format' });
+      }
+    } else if (Array.isArray(aiDecisionStr)) {
+      decisions = aiDecisionStr;
+    } else {
+      decisions = [aiDecisionStr];
+    }
+
+    const results = [];
+    for (const d of decisions) {
+      if (d && d.action === 'scale-out' && d.service && d.replicas) {
+        logActivity('info', `Proactively scaling ${d.service} to ${d.replicas} based on AI decision`);
+        const result = await healer.scaleService(d.service, d.replicas);
+        results.push(result);
+      }
+    }
+    res.json({ success: true, results });
+  } catch (error) {
+    console.error('Scale bulk error:', error);
+    res.status(500).json(ERRORS.ACTION_FAILED().toJSON());
+  }
+});
+
 // --- PREDICTION ENDPOINTS ---
 
 app.get('/api/predictions', (req, res) => {
   const predictions = scalingPredictor.getPredictions();
-  res.json({ predictions, evaluatedAt: new Date().toISOString() });
+  const evaluatedAt = predictions.length > 0
+    ? predictions.reduce((latest, p) => p.evaluatedAt > latest ? p.evaluatedAt : latest, predictions[0].evaluatedAt)
+    : new Date().toISOString();
+  res.json({ predictions, evaluatedAt });
 });
 
 app.get('/api/predictions/:id', validateId, (req, res) => {
