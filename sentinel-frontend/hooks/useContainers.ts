@@ -12,11 +12,15 @@ export interface Container {
     ports: { PrivatePort: number; PublicPort?: number; Type: string }[];
     created: string;
     metrics?: {
-        cpu: number;
+        cpu: string;
         memory: {
-            percent: number;
-            used: number;
-            total: number;
+            usage: string;
+            limit: string;
+            percent: string;
+        };
+        network: {
+            rx: string;
+            tx: string;
         };
     };
 }

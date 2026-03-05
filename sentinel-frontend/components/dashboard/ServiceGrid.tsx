@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { usePredictions } from "@/hooks/usePredictions";
 
 export const ServiceGrid = memo(function ServiceGrid({ services }: { services: Service[] }) {
-    const predictionsMap = usePredictions();
+    const { predictionsMap } = usePredictions();
     const predictions = Object.values(predictionsMap);
 
     const getPrediction = (service: Service) => {
