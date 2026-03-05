@@ -132,16 +132,39 @@ app.use('/api', contactRoutes);
 // Reasoning Routes - AI Transparency
 app.use('/api/reasoning', requireAuth, reasoningRoutes);
 
+// Load services configuration dynamically
+const { 
+  getAllServices: getConfiguredServices, 
+  getServicesByCluster,
+  getServicesByRegion,
+  getServicePortMap,
+  getRemoteAgentConfig 
+} = require('./config/servicesLoader');
+
 // --- IN-MEMORY DATABASE ---
-let systemStatus = {
-  services: {
-    auth: { status: 'unknown', code: 0, lastUpdated: null },
-    payment: { status: 'unknown', code: 0, lastUpdated: null },
-    notification: { status: 'unknown', code: 0, lastUpdated: null }
-  },
-  aiAnalysis: "Waiting for AI report...",
-  lastUpdated: new Date()
-};
+// Initialize system status from configuration
+const configuredServices = getConfiguredServices();
+function initializeSystemStatus() {
+  const servicesState = {};
+  for (const svc of configuredServices) {
+    servicesState[svc.name] = { 
+      status: 'unknown', 
+      code: 0, 
+      lastUpdated: null,
+      cluster: svc.cluster,
+      clusterName: svc.clusterName,
+      region: svc.region
+    };
+  }
+  return {
+    services: servicesState,
+    clusters: getServicesByCluster(),
+    aiAnalysis: "Waiting for AI report...",
+    lastUpdated: new Date()
+  };
+}
+
+let systemStatus = initializeSystemStatus();
 
 let activityLog = [];
 let aiLogs = [];
@@ -168,12 +191,16 @@ function logActivity(type, message) {
 // WebSocket Broadcaster
 let wsBroadcaster = { broadcast: () => { } };
 
-// Service configuration
-const services = [
-  { name: 'auth', url: 'http://localhost:3001/health' },
-  { name: 'payment', url: 'http://localhost:3002/health' },
-  { name: 'notification', url: 'http://localhost:3003/health' }
-];
+// Service configuration - loaded dynamically from services.config.json
+const services = configuredServices.map(s => ({
+  name: s.name,
+  url: s.url,
+  type: s.type,
+  cluster: s.cluster,
+  clusterName: s.clusterName,
+  region: s.region,
+  port: s.port
+}));
 
 // Smart Restart Tracking
 const restartTracker = new Map(); // containerId -> { attempts: number, lastAttempt: number }
@@ -358,8 +385,9 @@ app.post('/api/kestra-webhook', (req, res) => {
 
 app.post('/api/action/:service/:type', async (req, res) => {
   const { service, type } = req.params;
-  const serviceMap = { 'auth': 3001, 'payment': 3002, 'notification': 3003 };
-  const port = serviceMap[service];
+  // Use dynamic service port mapping from configuration
+  const servicePortMap = getServicePortMap();
+  const port = servicePortMap[service];
 
   incidents.logActivity('info', `Triggering action '${type}' on service '${service}'`);
 
@@ -368,13 +396,17 @@ app.post('/api/action/:service/:type', async (req, res) => {
     return res.status(400).json(ERRORS.SERVICE_NOT_FOUND(service).toJSON());
   }
 
+  // Find service URL base from configuration
+  const serviceConfig = services.find(s => s.name === service);
+  const serviceUrl = serviceConfig ? new URL(serviceConfig.url).origin : `http://localhost:${port}`;
+
   try {
     let mode = 'healthy';
     if (type === 'crash' || type === 'down') mode = 'down';
     if (type === 'degraded') mode = 'degraded';
     if (type === 'slow') mode = 'slow';
 
-    await axios.post(`http://localhost:${port}/simulate/${mode}`, {}, { timeout: 5000 });
+    await axios.post(`${serviceUrl}/simulate/${mode}`, {}, { timeout: 5000 });
     // Force a health check to update status immediately
     await serviceMonitor.checkServiceHealth();
 
@@ -660,6 +692,111 @@ app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScal
   } catch (error) {
     res.status(500).json(ERRORS.ACTION_FAILED().toJSON());
   }
+});
+
+// ============================================
+// MULTI-CLUSTER / MULTI-REGION API ENDPOINTS
+// ============================================
+
+/**
+ * GET /api/clusters - Get all services grouped by cluster
+ */
+app.get('/api/clusters', (req, res) => {
+  const clusters = serviceMonitor.getServicesGroupedByCluster();
+  res.json({ clusters });
+});
+
+/**
+ * GET /api/regions - Get all services grouped by region
+ */
+app.get('/api/regions', (req, res) => {
+  const regions = serviceMonitor.getServicesGroupedByRegion();
+  res.json({ regions });
+});
+
+/**
+ * GET /api/services/grouped - Get services with cluster/region metadata
+ */
+app.get('/api/services/grouped', (req, res) => {
+  const groupBy = req.query.groupBy || 'cluster';
+  
+  if (groupBy === 'region') {
+    res.json({ 
+      groupBy: 'region',
+      data: serviceMonitor.getServicesGroupedByRegion() 
+    });
+  } else {
+    res.json({ 
+      groupBy: 'cluster',
+      data: serviceMonitor.getServicesGroupedByCluster() 
+    });
+  }
+});
+
+/**
+ * POST /api/remote-agent/report - Receive health reports from remote agents
+ * Protected by webhook secret verification
+ */
+app.post('/api/remote-agent/report', (req, res) => {
+  const remoteAgentConfig = getRemoteAgentConfig();
+  
+  // Verify webhook secret if configured
+  if (remoteAgentConfig.webhookSecret) {
+    const signature = req.headers['x-sentinel-signature'];
+    if (!signature) {
+      return res.status(401).json({ error: 'Missing signature header' });
+    }
+    
+    const hmac = crypto.createHmac('sha256', remoteAgentConfig.webhookSecret);
+    hmac.update(JSON.stringify(req.body));
+    const expectedSignature = 'sha256=' + hmac.digest('hex');
+    
+    try {
+      if (!crypto.timingSafeEqual(Buffer.from(signature, 'utf8'), Buffer.from(expectedSignature, 'utf8'))) {
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+    } catch (e) {
+      return res.status(401).json({ error: 'Invalid signature format' });
+    }
+  }
+  
+  const { type, clusterId, clusterName, region, timestamp, services: reportedServices } = req.body;
+  
+  if (type !== 'agent_report') {
+    return res.status(400).json({ error: 'Invalid report type' });
+  }
+  
+  if (!clusterId || !reportedServices) {
+    return res.status(400).json({ error: 'Missing clusterId or services in report' });
+  }
+  
+  // Handle the remote agent report
+  serviceMonitor.handleRemoteAgentReport({
+    clusterId,
+    clusterName: clusterName || clusterId,
+    region: region || 'remote',
+    services: reportedServices
+  });
+  
+  logActivity('info', `Received health report from remote agent: ${clusterId} (${Object.keys(reportedServices).length} services)`);
+  
+  res.json({ 
+    success: true, 
+    message: `Report received for cluster ${clusterId}`,
+    timestamp: new Date().toISOString()
+  });
+});
+
+/**
+ * GET /api/remote-agent/status - Check remote agent configuration status
+ */
+app.get('/api/remote-agent/status', (req, res) => {
+  const config = getRemoteAgentConfig();
+  res.json({
+    enabled: config.enabled,
+    hasWebhookSecret: !!config.webhookSecret,
+    endpointsCount: config.endpoints.length
+  });
 });
 
 let globalWsBroadcaster;

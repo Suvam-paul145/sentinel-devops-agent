@@ -2,7 +2,7 @@
 
 import { Service } from "@/lib/mockData";
 import { getStatusColor } from "@/lib/theme";
-import { MoreHorizontal, Cloud, Database, Server, Shield, Zap } from "lucide-react";
+import { MoreHorizontal, Cloud, Database, Server, Shield, Zap, Globe } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { cn } from "@/lib/utils";
 import { Spotlight } from "@/components/common/Spotlight";
@@ -35,6 +35,8 @@ const StatusDot = ({ status }: { status: Service["status"] }) => {
 };
 
 export function ServiceCard({ service, prediction }: { service: Service; prediction?: Prediction }) {
+    const showClusterInfo = service.cluster || service.region;
+    
     return (
         <Spotlight className="p-5 bg-card border-border hover:border-primary/20 transition-all group">
             <div className="flex justify-between items-start mb-4">
@@ -54,6 +56,22 @@ export function ServiceCard({ service, prediction }: { service: Service; predict
                     <MoreHorizontal className="h-4 w-4" />
                 </Button>
             </div>
+            
+            {/* Cluster/Region Badge */}
+            {showClusterInfo && (
+                <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground">
+                        <Server className="h-3 w-3" />
+                        <span>{service.clusterName || service.cluster}</span>
+                    </div>
+                    {service.region && (
+                        <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground">
+                            <Globe className="h-3 w-3" />
+                            <span>{service.region}</span>
+                        </div>
+                    )}
+                </div>
+            )}
             
             {/* Prediction Badge */}
             <div className="mb-3">
