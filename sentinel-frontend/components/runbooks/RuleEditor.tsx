@@ -15,11 +15,12 @@ export function RuleEditor({ item, onSave, onCancel }: RuleEditorProps) {
     }, [item]);
 
     const handleChange = (key: string, value: any) => {
-        if ('type' in item && 'parameters' in (formData as RunbookAction)) {
-            setFormData((prev) => ({
-                ...prev,
-                parameters: { ...prev.parameters, [key]: value }
-            }));
+        if ('parameters' in formData) {
+            const action = formData as RunbookAction;
+            setFormData({
+                ...action,
+                parameters: { ...action.parameters, [key]: value }
+            } as RunbookAction);
         } else {
             setFormData((prev) => ({ ...prev, [key]: value }));
         }
@@ -47,7 +48,7 @@ export function RuleEditor({ item, onSave, onCancel }: RuleEditorProps) {
                             <label className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">Threshold</label>
                             <input
                                 type="number"
-                                value={formData.threshold || ''}
+                                value={(formData as RunbookTrigger).threshold || ''}
                                 onChange={(e) => handleChange('threshold', parseInt(e.target.value))}
                                 className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white text-sm focus:border-blue-500 outline-none"
                             />
@@ -56,7 +57,7 @@ export function RuleEditor({ item, onSave, onCancel }: RuleEditorProps) {
                             <label className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">Window (seconds)</label>
                             <input
                                 type="number"
-                                value={formData.window || ''}
+                                value={(formData as RunbookTrigger).window || ''}
                                 onChange={(e) => handleChange('window', parseInt(e.target.value))}
                                 className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white text-sm focus:border-blue-500 outline-none"
                             />
@@ -64,18 +65,18 @@ export function RuleEditor({ item, onSave, onCancel }: RuleEditorProps) {
                     </>
                 ) : (
                     <div className="space-y-3">
-                        {Object.keys(formData.parameters || {}).map(key => (
+                        {(formData as RunbookAction).parameters && Object.keys((formData as RunbookAction).parameters!).map(key => (
                             <div key={key}>
                                 <label className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">{key}</label>
                                 <input
                                     type="text"
-                                    value={formData.parameters[key] || ''}
+                                    value={(formData as RunbookAction).parameters![key] || ''}
                                     onChange={(e) => handleChange(key, e.target.value)}
                                     className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white text-sm focus:border-emerald-500 outline-none"
                                 />
                             </div>
                         ))}
-                        {Object.keys(formData.parameters || {}).length === 0 && (
+                        {(!(formData as RunbookAction).parameters || Object.keys((formData as RunbookAction).parameters!).length === 0) && (
                             <p className="text-xs text-slate-500 italic">No adjustable parameters for this action.</p>
                         )}
                     </div>

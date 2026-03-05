@@ -54,7 +54,7 @@ export function CostBreakdownChart({ containers }: CostBreakdownChartProps) {
                                 ))}
                             </Pie>
                             <Tooltip
-                                formatter={(value: number) => [`$${value}`, 'Monthly Cost']}
+                                formatter={(value: any) => `$${Number(value || 0).toFixed(2)}`}
                                 contentStyle={{
                                     backgroundColor: 'rgba(15, 23, 42, 0.9)',
                                     borderRadius: '12px',

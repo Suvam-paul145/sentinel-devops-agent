@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useWebSocketContext } from '@/lib/WebSocketContext';
+import { useWebSocketMessage } from "@/lib/WebSocketContext";
 import { Prediction } from '@/components/dashboard/PredictionBadge';
 
 function isPrediction(data: unknown): data is Prediction {
@@ -13,12 +13,12 @@ function isPrediction(data: unknown): data is Prediction {
 }
 
 export function usePredictions() {
-    const { lastMessage } = useWebSocketContext();
+    const lastMessage = useWebSocketMessage();
     const [predictions, setPredictions] = useState<Record<string, Prediction>>({});
 
     useEffect(() => {
         if (!lastMessage) return;
-        
+
         if (lastMessage.type === 'PREDICTION' && isPrediction(lastMessage.data)) {
             const data = lastMessage.data;
             setPredictions(prev => ({

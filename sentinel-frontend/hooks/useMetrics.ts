@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { useWebSocketContext } from "../lib/WebSocketContext";
+import { useWebSocketMessage, useWebSocketConnection } from "../lib/WebSocketContext";
 
 export type TimeSeriesPoint = {
     timestamp: string;
@@ -51,7 +51,8 @@ export function useMetrics() {
         "api-gateway": { id: "api-gateway", name: "API Gateway", currentResponseTime: 15, currentErrorRate: 0, currentCpu: 12, history: [...initialHistory] },
     }));
 
-    const { isConnected, lastMessage } = useWebSocketContext();
+    const lastMessage = useWebSocketMessage();
+    const { isConnected } = useWebSocketConnection();
     const [remoteStatus, setRemoteStatus] = useState<RemoteStatus>({});
 
     // Listen for WebSocket messages from Context

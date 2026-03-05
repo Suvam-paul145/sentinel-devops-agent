@@ -4,34 +4,39 @@ import React, { createContext, useContext, ReactNode } from 'react';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { WebSocketMessage } from './websocket';
 
-interface WebSocketContextType {
+interface WebSocketConnectionContextType {
     isConnected: boolean;
-    lastMessage: WebSocketMessage | null;
     sendMessage: (msg: unknown) => void;
 }
 
-const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined);
+const WebSocketConnectionContext = createContext<WebSocketConnectionContextType | undefined>(undefined);
+const WebSocketMessageContext = createContext<WebSocketMessage | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
     const { isConnected, lastMessage, sendMessage } = useWebSocket();
 
-    const value = React.useMemo(() => ({
+    const connectionValue = React.useMemo(() => ({
         isConnected,
-        lastMessage,
         sendMessage
-    }), [isConnected, lastMessage, sendMessage]);
+    }), [isConnected, sendMessage]);
 
     return (
-        <WebSocketContext.Provider value={value}>
-            {children}
-        </WebSocketContext.Provider>
+        <WebSocketConnectionContext.Provider value={connectionValue}>
+            <WebSocketMessageContext.Provider value={lastMessage}>
+                {children}
+            </WebSocketMessageContext.Provider>
+        </WebSocketConnectionContext.Provider>
     );
 }
 
-export function useWebSocketContext() {
-    const context = useContext(WebSocketContext);
+export function useWebSocketConnection() {
+    const context = useContext(WebSocketConnectionContext);
     if (context === undefined) {
-        throw new Error('useWebSocketContext must be used within a WebSocketProvider');
+        throw new Error('useWebSocketConnection must be used within a WebSocketProvider');
     }
     return context;
+}
+
+export function useWebSocketMessage() {
+    return useContext(WebSocketMessageContext);
 }

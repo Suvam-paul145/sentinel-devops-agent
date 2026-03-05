@@ -32,11 +32,22 @@ StatusDot.displayName = "StatusDot";
 
 export const ContainerCard = memo(function ContainerCard({ container, onRestart }: ContainerCardProps) {
     const isHealthy = container.health === 'healthy';
+    const [isRestarting, setIsRestarting] = React.useState(false);
 
     // Stable mock trend data using useMemo to avoid re-calculating on every render
     const mockTrend = React.useMemo(() =>
         Array.from({ length: 12 }, () => 20 + Math.random() * 10),
         []);
+
+    const handleRestart = async () => {
+        if (isRestarting) return;
+        setIsRestarting(true);
+        try {
+            await Promise.resolve(onRestart(container.id));
+        } finally {
+            setIsRestarting(false);
+        }
+    };
 
     return (
         <Spotlight className="p-5 bg-card border-border hover:border-primary/20 transition-all group">
@@ -57,12 +68,11 @@ export const ContainerCard = memo(function ContainerCard({ container, onRestart 
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-muted-foreground hover:text-primary transition-colors"
-                    onClick={() => {
-                        onRestart(container.id);
-                    }}
-                    title="Restart Container"
+                    disabled={isRestarting}
+                    onClick={handleRestart}
+                    title={isRestarting ? "Restarting..." : "Restart Container"}
                 >
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className={cn("h-4 w-4", isRestarting && "animate-spin")} />
                 </Button>
             </div>
 
