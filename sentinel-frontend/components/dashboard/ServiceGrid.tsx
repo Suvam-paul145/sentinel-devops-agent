@@ -52,10 +52,12 @@ export function ServiceGrid({ services, groupBy = 'none' }: ServiceGridProps) {
 
             if (groupBy === 'cluster') {
                 groupKey = service.cluster || 'default';
-                groupName = service.clusterName || service.cluster || 'Default Cluster';
+                // Use consistent fallback: clusterName -> cluster -> key-based display name
+                groupName = service.clusterName || service.cluster || (groupKey === 'default' ? 'Default Cluster' : groupKey);
             } else {
                 groupKey = service.region || 'default';
-                groupName = service.region || 'Default Region';
+                // Use consistent fallback: region value or key-based display name
+                groupName = service.region || (groupKey === 'default' ? 'Default Region' : groupKey);
             }
 
             if (!grouped[groupKey]) {

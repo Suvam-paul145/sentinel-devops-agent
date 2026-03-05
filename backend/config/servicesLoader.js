@@ -131,12 +131,13 @@ function loadServicesConfig(options = {}) {
 
     return validated;
   } catch (err) {
-    if (!silent) {
-      console.error(`❌ Invalid services configuration: ${err.message}`);
-      if (err.errors) {
-        err.errors.forEach(e => console.error(`   - ${e.path.join('.')}: ${e.message}`));
-      }
+    // Always log validation errors, even in silent mode, as they indicate configuration problems
+    console.error(`❌ Invalid services configuration from ${source}: ${err.message}`);
+    if (err.errors) {
+      err.errors.forEach(e => console.error(`   - ${e.path.join('.')}: ${e.message}`));
     }
+    console.warn('⚠️  Falling back to default configuration due to validation errors');
+    
     // Fall back to default if validation fails
     cachedConfig = DEFAULT_CONFIG;
     return DEFAULT_CONFIG;

@@ -222,13 +222,15 @@ app.get('/config', (req, res) => {
  * Start the remote agent
  */
 function startAgent() {
-  // Start periodic health checking
+  // Start periodic health checking (every 5 seconds minimum, up to reportIntervalMs)
   if (config.localServicesConfig.length > 0) {
     checkAllServices(); // Initial check
-    setInterval(checkAllServices, Math.min(config.reportIntervalMs, 5000));
+    // Health checks run at a minimum of 5 seconds, but can be configured slower
+    const healthCheckInterval = Math.max(config.reportIntervalMs / 6, 5000);
+    setInterval(checkAllServices, healthCheckInterval);
   }
 
-  // Start periodic reporting to central
+  // Start periodic reporting to central (at configured interval)
   if (config.sentinelBackend) {
     setInterval(reportToCentral, config.reportIntervalMs);
   }

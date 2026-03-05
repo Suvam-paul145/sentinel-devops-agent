@@ -203,12 +203,18 @@ function getServicesGroupedByRegion() {
 
 /**
  * Update service status from remote agent report
+ * 
+ * Note: Remote agent services use a namespaced naming convention: `${clusterId}:${serviceName}`
+ * This distinguishes them from locally configured services (which use just `serviceName`).
+ * This is intentional to avoid naming conflicts between services in different clusters.
+ * 
  * @param {Object} report - Remote agent health report
  */
 function handleRemoteAgentReport(report) {
     const { clusterId, clusterName, region, services: reportedServices } = report;
     
     for (const [serviceName, serviceData] of Object.entries(reportedServices)) {
+        // Use namespaced format to distinguish remote services from local ones
         const fullServiceName = `${clusterId}:${serviceName}`;
         
         // Initialize if not exists

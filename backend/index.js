@@ -751,12 +751,16 @@ app.post('/api/remote-agent/report', (req, res) => {
     hmac.update(JSON.stringify(req.body));
     const expectedSignature = 'sha256=' + hmac.digest('hex');
     
-    try {
-      if (!crypto.timingSafeEqual(Buffer.from(signature, 'utf8'), Buffer.from(expectedSignature, 'utf8'))) {
-        return res.status(401).json({ error: 'Invalid signature' });
-      }
-    } catch (e) {
-      return res.status(401).json({ error: 'Invalid signature format' });
+    // Check signature lengths first to avoid timingSafeEqual throwing on length mismatch
+    const signatureBuffer = Buffer.from(signature, 'utf8');
+    const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+    
+    if (signatureBuffer.length !== expectedBuffer.length) {
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+    
+    if (!crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
+      return res.status(401).json({ error: 'Invalid signature' });
     }
   }
   
