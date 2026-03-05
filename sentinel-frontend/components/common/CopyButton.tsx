@@ -18,6 +18,7 @@ export function CopyButton({ textToCopy, className }: CopyButtonProps) {
 
   return (
     <button
+      type="button"
       onClick={() => copyToClipboard(textToCopy)}
       className={cn(
         'p-1.5 rounded-md transition-all duration-200',

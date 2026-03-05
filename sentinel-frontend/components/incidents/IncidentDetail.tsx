@@ -29,21 +29,17 @@ export function IncidentDetail({ incident, onViewReasoning }: IncidentDetailProp
             {/* Root Cause & Agent Action */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1 relative group/rc">
-                    <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium flex justify-between items-center">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-medium flex justify-between items-center">
                         Root Cause
-                        <div className="opacity-0 group-hover/rc:opacity-100 transition-opacity">
-                            <CopyButton textToCopy={incident.rootCause} />
-                        </div>
-                    </span>
+                        <CopyButton textToCopy={incident.rootCause} className="opacity-0 group-hover/rc:opacity-100 transition-opacity" />
+                    </div>
                     <p className="text-sm text-white">{incident.rootCause}</p>
                 </div>
                 <div className="space-y-1 relative group/aa">
-                    <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium flex justify-between items-center">
+                    <div className="text-xs text-muted-foreground uppercase tracking-wider font-medium flex justify-between items-center">
                         Agent Action
-                        <div className="opacity-0 group-hover/aa:opacity-100 transition-opacity">
-                            <CopyButton textToCopy={incident.agentAction} />
-                        </div>
-                    </span>
+                        <CopyButton textToCopy={incident.agentAction} className="opacity-0 group-hover/aa:opacity-100 transition-opacity" />
+                    </div>
                     <p className="text-sm text-primary flex items-center gap-1">
                         <Zap className="h-3 w-3" />
                         {incident.agentAction}

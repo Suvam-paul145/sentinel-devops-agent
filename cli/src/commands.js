@@ -245,10 +245,13 @@ export const generateReport = async () => {
                     analysis: analysis
                 });
                 healthyStart = item.timestamp;
-            } else if (!healthyStart) {
-                healthyStart = item.timestamp;
+                lastStatus = isCritical ? 'critical' : 'degraded';
+            } else {
+                if (!healthyStart) {
+                    healthyStart = item.timestamp;
+                }
+                lastStatus = 'healthy';
             }
-            lastStatus = 'healthy';
         });
 
         // Generate report

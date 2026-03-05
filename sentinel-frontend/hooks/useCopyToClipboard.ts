@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 export function useCopyToClipboard(timeout = 2000) {
   const [isCopied, setIsCopied] = useState(false);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const copyToClipboard = useCallback(async (text: string) => {
     if (!navigator?.clipboard) {
@@ -10,25 +11,29 @@ export function useCopyToClipboard(timeout = 2000) {
     }
 
     try {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
       await navigator.clipboard.writeText(text);
       setIsCopied(true);
+      
+      timeoutRef.current = setTimeout(() => {
+        setIsCopied(false);
+      }, timeout);
+
       return true;
     } catch (error) {
       console.error('Failed to copy text: ', error);
       setIsCopied(false);
       return false;
     }
-  }, []);
+  }, [timeout]);
 
   useEffect(() => {
-    if (isCopied) {
-      const timeoutId = setTimeout(() => {
-        setIsCopied(false);
-      }, timeout);
-
-      return () => clearTimeout(timeoutId);
-    }
-  }, [isCopied, timeout]);
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
 
   return { isCopied, copyToClipboard };
 }
