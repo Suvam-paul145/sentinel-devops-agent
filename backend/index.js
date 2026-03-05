@@ -10,11 +10,14 @@ const { ERRORS } = require('./lib/errors');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-const { listContainers, getContainerHealth } = require('./docker/client');
+const { listContainers, getContainerHealth, hostManager } = require('./docker/client');
 const containerMonitor = require('./docker/monitor');
 const healer = require('./docker/healer');
 const { insertActivityLog, getActivityLogs, insertAIReport, getAIReports } = require('./db/logs');
 const { routeEvent } = require('./config/notifications');
+
+// Hosts Routes for multi-host Docker support
+const hostsRoutes = require('./routes/hosts.routes');
 
 const pendingApprovals = new Map();
 
@@ -119,6 +122,9 @@ app.use('/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/roles', rolesRoutes);
 app.use('/api/approvals', approvalsRoutes);
+
+// Multi-host Docker Routes
+app.use('/api/hosts', hostsRoutes);
 
 // FinOps Routes
 app.use('/api/finops', finopsRoutes);
@@ -546,7 +552,9 @@ const validateScaleParams = (req, res, next) => {
 
 app.get('/api/docker/containers', async (req, res) => {
   try {
-    const containers = await listContainers();
+    // Support host filtering via query parameter
+    const hostId = req.query.hostId || null;
+    const containers = await listContainers({}, hostId);
     // Use Promise.allSettled to handle monitoring setup concurrently without crashing
     await Promise.allSettled(containers.map(c => containerMonitor.startMonitoring(c.id)));
 
@@ -564,7 +572,18 @@ app.get('/api/docker/containers', async (req, res) => {
     // Broadcast container updates to all WebSocket clients
     wsBroadcaster.broadcast('CONTAINER_UPDATE', { containers: enrichedContainers });
 
-    res.json({ containers: enrichedContainers });
+    // Include host summary in response
+    const hostSummary = hostManager.getAll().map(h => ({
+      id: h.id,
+      label: h.label,
+      status: h.status,
+      containersRunning: h.containersRunning || 0
+    }));
+
+    res.json({ 
+      containers: enrichedContainers,
+      hosts: hostSummary
+    });
   } catch (error) {
     res.status(500).json(ERRORS.DOCKER_CONNECTION().toJSON());
   }
@@ -664,8 +683,17 @@ app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScal
 
 let globalWsBroadcaster;
 
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Sentinel Backend running on http://0.0.0.0:${PORT}`);
+  
+  // Initialize multi-host Docker manager
+  try {
+    await hostManager.initialize();
+    console.log(`🐳 Docker Host Manager initialized with ${hostManager.getConnected().length} connected host(s)`);
+  } catch (err) {
+    console.warn('⚠️ Docker Host Manager initialization failed:', err.message);
+  }
+  
   // Start FinOps metrics collector
   startFinOpsCollector();
 });

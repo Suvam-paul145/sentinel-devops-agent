@@ -1,4 +1,4 @@
-const { docker } = require('./client');
+const { docker, hostManager } = require('./client');
 const { scanImage } = require('../security/scanner');
 const EventEmitter = require('events');
 const metricsStore = require('../db/metrics-store');
@@ -15,62 +15,93 @@ class ContainerMonitor extends EventEmitter {
         this.containerNames = new Map();
         this.lastInspectTimes = new Map();
         this.lastPredictTimes = new Map();
+        // Track container-to-host mapping for multi-host support
+        this.containerHosts = new Map();
     }
 
-    async startMonitoring(containerId) {
-        if (this.watchers.has(containerId)) return;
+    /**
+     * Start monitoring a container (supports compound IDs)
+     * @param {string} compoundId - Compound ID (hostId:containerId) or raw containerId
+     * @param {string} hostId - Optional explicit host ID
+     */
+    async startMonitoring(compoundId, hostId = null) {
+        // Use compound ID as the key for all maps
+        if (this.watchers.has(compoundId)) return;
+
+        // Parse compound ID to get host and container
+        const parsed = hostManager.parseId(compoundId);
+        const targetHostId = hostId || parsed.hostId;
+        const containerId = parsed.containerId || compoundId;
+
+        // Get the appropriate Docker client
+        const client = hostManager.initialized 
+            ? hostManager.getClient(targetHostId) 
+            : docker;
+
+        if (!client) {
+            console.error(`[Monitor] No client available for host '${targetHostId}'`);
+            return;
+        }
 
         try {
-            const container = docker.getContainer(containerId);
+            const container = client.getContainer(containerId);
             const data = await container.inspect();
             const imageId = data.Image;
             
             // Track initial restart count
-            this.restartCounts.set(containerId, data.RestartCount || 0);
+            this.restartCounts.set(compoundId, data.RestartCount || 0);
             // Track container name
-            this.containerNames.set(containerId, data.Name.replace(/^\//, ''));
+            this.containerNames.set(compoundId, data.Name.replace(/^\//, ''));
+            // Track which host this container is on
+            this.containerHosts.set(compoundId, targetHostId);
 
             const stream = await container.stats({ stream: true });
 
-            this.watchers.set(containerId, stream);
+            this.watchers.set(compoundId, stream);
 
             // Schedule periodic scans after successful stream setup
-            this.scheduleSecurityScan(containerId, imageId);
+            this.scheduleSecurityScan(compoundId, imageId);
 
             stream.on('data', async (chunk) => {
                 try {
                     const stats = JSON.parse(chunk.toString());
                     const parsed = this.parseStats(stats);
-                    this.metrics.set(containerId, parsed);
+                    // Add hostId to metrics
+                    parsed.hostId = targetHostId;
+                    this.metrics.set(compoundId, parsed);
 
                     // Throttle inspect requests to every 30s to update restart counts
                     const now = Date.now();
-                    const lastInspect = this.lastInspectTimes.get(containerId) || 0;
+                    const lastInspect = this.lastInspectTimes.get(compoundId) || 0;
                     
                     if (now - lastInspect > 30000) {
-                        this.lastInspectTimes.set(containerId, now);  // guard before await
+                        this.lastInspectTimes.set(compoundId, now);  // guard before await
                         try {
                             const currentInfo = await container.inspect();
-                            this.restartCounts.set(containerId, currentInfo.RestartCount || 0);
+                            this.restartCounts.set(compoundId, currentInfo.RestartCount || 0);
                         } catch (inspectError) {
                             // Suppress transient inspect errors
                         }
                     }
 
-                    const lastPredict = this.lastPredictTimes.get(containerId) || 0;
+                    const lastPredict = this.lastPredictTimes.get(compoundId) || 0;
 
                     if (now - lastPredict > 5000) {
-                        metricsStore.push(containerId, { 
+                        metricsStore.push(compoundId, { 
                             cpuPercent: parsed.raw.cpuPercent, 
                             memPercent: parsed.raw.memPercent, 
-                            restartCount: this.restartCounts.get(containerId) || 0 
+                            restartCount: this.restartCounts.get(compoundId) || 0 
                         });
 
-                        const prediction = predictContainer(containerId);
+                        const prediction = predictContainer(compoundId);
                         if (prediction && prediction.probability > 0.3) {
-                            this.emit('prediction', { ...prediction, containerName: this.containerNames.get(containerId) });
+                            this.emit('prediction', { 
+                                ...prediction, 
+                                containerName: this.containerNames.get(compoundId),
+                                hostId: targetHostId
+                            });
                         }
-                        this.lastPredictTimes.set(containerId, now);
+                        this.lastPredictTimes.set(compoundId, now);
                     }
                 } catch (e) {
                     // Ignore parse errors from partial chunks
@@ -79,51 +110,52 @@ class ContainerMonitor extends EventEmitter {
 
 
             stream.on('error', (err) => {
-                console.error(`Stream error for ${containerId}:`, err);
-                this.stopMonitoring(containerId);
+                console.error(`Stream error for ${compoundId}:`, err);
+                this.stopMonitoring(compoundId);
             });
 
             stream.on('end', () => {
-                this.stopMonitoring(containerId);
+                this.stopMonitoring(compoundId);
             });
 
             // watchers.set was moved up
         } catch (error) {
-            console.error(`Failed to start monitoring ${containerId}:`, error);
-            this.stopMonitoring(containerId); // Clean up any timers/watchers
+            console.error(`Failed to start monitoring ${compoundId}:`, error);
+            this.stopMonitoring(compoundId); // Clean up any timers/watchers
         }
     }
 
-    stopMonitoring(containerId) {
-        if (this.watchers.has(containerId)) {
-            const stream = this.watchers.get(containerId);
+    stopMonitoring(compoundId) {
+        if (this.watchers.has(compoundId)) {
+            const stream = this.watchers.get(compoundId);
             if (stream && stream.destroy) stream.destroy();
-            this.watchers.delete(containerId);
-            this.metrics.delete(containerId);
-            this.lastStorePush.delete(containerId);
-            if (this.lastPredictTimes) this.lastPredictTimes.delete(containerId);
-            this.restartCounts.delete(containerId);
-            this.containerNames.delete(containerId);
-            this.lastInspectTimes.delete(containerId);
-            metricsStore.clear(containerId);
+            this.watchers.delete(compoundId);
+            this.metrics.delete(compoundId);
+            this.lastStorePush.delete(compoundId);
+            if (this.lastPredictTimes) this.lastPredictTimes.delete(compoundId);
+            this.restartCounts.delete(compoundId);
+            this.containerNames.delete(compoundId);
+            this.lastInspectTimes.delete(compoundId);
+            this.containerHosts.delete(compoundId);
+            metricsStore.clear(compoundId);
         }
-        if (this.securityTimers.has(containerId)) {
-            clearInterval(this.securityTimers.get(containerId));
-            this.securityTimers.delete(containerId);
+        if (this.securityTimers.has(compoundId)) {
+            clearInterval(this.securityTimers.get(compoundId));
+            this.securityTimers.delete(compoundId);
         }
     }
 
-    scheduleSecurityScan(containerId, imageId) {
+    scheduleSecurityScan(compoundId, imageId) {
         // Run scan immediately if not cached recently (scanner internally checks cache)
-        scanImage(imageId).catch(err => console.error(`[Security] Automated scan failed for ${containerId}:`, err.message));
+        scanImage(imageId).catch(err => console.error(`[Security] Automated scan failed for ${compoundId}:`, err.message));
 
         // Schedule periodic scans (e.g., daily)
         const interval = 24 * 60 * 60 * 1000;
         const timer = setInterval(() => {
-            scanImage(imageId).catch(err => console.error(`[Security] Periodic scan failed for ${containerId}:`, err.message));
+            scanImage(imageId).catch(err => console.error(`[Security] Periodic scan failed for ${compoundId}:`, err.message));
         }, interval);
 
-        this.securityTimers.set(containerId, timer);
+        this.securityTimers.set(compoundId, timer);
     }
 
     parseStats(stats) {
@@ -186,8 +218,40 @@ class ContainerMonitor extends EventEmitter {
         return parseFloat((bytes / Math.pow(k, safeIndex)).toFixed(2)) + ' ' + sizes[safeIndex];
     }
 
-    getMetrics(containerId) {
-        return this.metrics.get(containerId);
+    getMetrics(compoundId) {
+        return this.metrics.get(compoundId);
+    }
+
+    /**
+     * Get all metrics aggregated across hosts
+     * @returns {Object} Map of compoundId -> metrics
+     */
+    getAllMetrics() {
+        return Object.fromEntries(this.metrics);
+    }
+
+    /**
+     * Get metrics for a specific host
+     * @param {string} hostId - Host ID
+     * @returns {Object} Map of compoundId -> metrics for that host
+     */
+    getMetricsByHost(hostId) {
+        const result = {};
+        for (const [compoundId, metrics] of this.metrics) {
+            if (this.containerHosts.get(compoundId) === hostId) {
+                result[compoundId] = metrics;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Get host ID for a container
+     * @param {string} compoundId - Container compound ID
+     * @returns {string|undefined} Host ID
+     */
+    getContainerHost(compoundId) {
+        return this.containerHosts.get(compoundId);
     }
 }
 
