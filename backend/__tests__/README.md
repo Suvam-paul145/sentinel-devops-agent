@@ -4,7 +4,7 @@ Comprehensive test coverage for Sentinel DevOps Agent with unit, integration, an
 
 ## Test Pyramid Structure
 
-```
+```text
             ┌─────────────────────────────────┐
            │       E2E Chaos Tests           │  ← Full stack, ~90s
            │   (6 scenarios, real Docker)    │
@@ -316,7 +316,7 @@ jobs:
       - name: Run E2E tests
         run: |
           cd backend
-          ./backend/__tests__/run-e2e.sh
+          ./__tests__/run-e2e.sh
       
       - name: Upload coverage
         uses: codecov/codecov-action@e28ff129e5465c2c0dcc6f003fc735cb6ae0c673 # v5.0.7

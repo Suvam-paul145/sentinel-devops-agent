@@ -57,7 +57,7 @@ echo -e "${YELLOW}⏳${NC} Waiting for backend to be ready..."
 MAX_WAIT=30
 WAITED=0
 while [ $WAITED -lt $MAX_WAIT ]; do
-    if curl -s http://localhost:$BACKEND_PORT/api/status > /dev/null 2>&1; then
+    if curl -fsS "http://localhost:$BACKEND_PORT/api/status" > /dev/null 2>&1; then
         echo -e "${GREEN}✓${NC} Backend is ready"
         break
     fi

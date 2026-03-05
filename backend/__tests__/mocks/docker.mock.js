@@ -57,7 +57,18 @@ const MockDockerClient = {
     getContainer: jest.fn((id) => ({
       inspect: jest.fn(async () => ({
         Id: id,
+        Name: '/test-container',
+        Image: 'test-image:latest',
+        RestartCount: 0,
+        Config: {
+          Image: 'test-image:latest',
+        },
+        HostConfig: {},
+        NetworkSettings: {
+          Networks: {},
+        },
         State: {
+          Running: true,
           Health: {
             Status: 'healthy',
             FailingStreak: 0,
@@ -68,6 +79,22 @@ const MockDockerClient = {
       kill: jest.fn(async () => {}),
       stop: jest.fn(async () => {}),
       restart: jest.fn(async () => {}),
+      remove: jest.fn(async () => {}),
+      rename: jest.fn(async () => {}),
+    })),
+
+    createContainer: jest.fn(async (opts) => ({
+      id: 'new-container-id',
+      start: jest.fn(async () => {}),
+      rename: jest.fn(async () => {}),
+    })),
+
+    getService: jest.fn((serviceName) => ({
+      inspect: jest.fn(async () => ({
+        Version: { Index: 1 },
+        Spec: { Mode: { Replicated: { Replicas: 2 } } },
+      })),
+      update: jest.fn(async () => {}),
     })),
   },
 

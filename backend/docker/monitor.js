@@ -8,6 +8,18 @@ class ContainerMonitor {
         this.watchers = new Map();
         this.lastStorePush = new Map();
         this.securityTimers = new Map();
+        
+        // Subscribe to host reload events to cleanup stale streams
+        hostManager.on('beforeHostsReload', () => this.stopAll());
+    }
+
+    /**
+     * Stop all active monitoring streams
+     */
+    stopAll() {
+        for (const containerId of this.watchers.keys()) {
+            this.stopMonitoring(containerId);
+        }
     }
 
     async startMonitoring(compoundId) {
