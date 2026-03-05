@@ -72,7 +72,7 @@ class DockerHostManager extends EventEmitter {
     if (connected.length === 1) {
       return { hostId: connected[0].id, containerId: rawId };
     }
-    throw new Error(`Invalid container id '${rawId}'. Expected '<hostId>:<containerId>'.`);
+    throw new Error(`Ambiguous container id '${rawId}': multiple hosts connected. Use format '<hostId>:<containerId>' to specify target host.`);
   }
 }
 

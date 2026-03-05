@@ -271,6 +271,18 @@ function loadCoverageData() {
   };
 }
 
+/**
+ * Categorize test suite by directory pattern
+ * @param {string} suiteName - The test suite name (file path)
+ * @returns {string} - Category name
+ */
+function categorizeTestSuite(suiteName) {
+  if (suiteName.includes('/unit/')) return 'Unit Tests';
+  if (suiteName.includes('/integration/')) return 'Integration Tests';
+  if (suiteName.includes('/e2e/')) return 'E2E Chaos Tests';
+  return 'Other Tests';
+}
+
 function loadTestResults() {
   // Attempt to load real Jest JSON output; fall back to neutral values if unavailable
   const possiblePaths = [
@@ -290,15 +302,16 @@ function loadTestResults() {
             ? data.numFailedTests
             : Math.max(total - passed, 0);
 
-        // Categorize tests by directory pattern
-        let unit = 0, integration = 0, e2e = 0;
+        // Categorize tests by directory pattern using shared function
+        let unit = 0, integration = 0, e2e = 0, other = 0;
         if (data.testResults) {
           for (const suite of data.testResults) {
             const testCount = suite.assertionResults?.length || 0;
-            if (suite.name.includes('/unit/')) unit += testCount;
-            else if (suite.name.includes('/integration/')) integration += testCount;
-            else if (suite.name.includes('/e2e/')) e2e += testCount;
-            else unit += testCount; // default to unit
+            const category = categorizeTestSuite(suite.name);
+            if (category === 'Unit Tests') unit += testCount;
+            else if (category === 'Integration Tests') integration += testCount;
+            else if (category === 'E2E Chaos Tests') e2e += testCount;
+            else other += testCount;
           }
         }
 
@@ -309,6 +322,7 @@ function loadTestResults() {
           unit,
           integration,
           e2e,
+          other,
           rawResults: data.testResults || [],
         };
       }
@@ -325,6 +339,7 @@ function loadTestResults() {
     unit: 0,
     integration: 0,
     e2e: 0,
+    other: 0,
     rawResults: [],
   };
 }
@@ -407,17 +422,10 @@ function generateTestSuites(jestResults) {
     `).join('');
   }
 
-  // Categorize tests by directory pattern
-  const categorize = (name) => {
-    if (name.includes('/unit/')) return 'Unit Tests';
-    if (name.includes('/integration/')) return 'Integration Tests';
-    if (name.includes('/e2e/')) return 'E2E Chaos Tests';
-    return 'Other Tests';
-  };
-
+  // Use shared categorization function
   const suiteMap = {};
   for (const suite of jestResults) {
-    const category = categorize(suite.name);
+    const category = categorizeTestSuite(suite.name);
     if (!suiteMap[category]) suiteMap[category] = { tests: [], passed: 0, failed: 0 };
     for (const test of suite.assertionResults || []) {
       const pass = test.status === 'passed';
