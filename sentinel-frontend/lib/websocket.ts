@@ -23,7 +23,8 @@ export type WebSocketMessage =
     | { type: 'SERVICE_UPDATE'; data: { name: string; status: string; code: number; lastUpdated: string } }
     | { type: 'METRICS'; data: MetricsPayload }
     | { type: 'INCIDENT_NEW'; data: IncidentNewPayload }
-    | { type: 'INCIDENT_RESOLVED'; data: { id: string } };
+    | { type: 'INCIDENT_RESOLVED'; data: { id: string } }
+    | { type: 'SCALE_PREDICTION'; data: { predictions: unknown[]; evaluatedAt: string } };
 
 export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ||
     (typeof window !== 'undefined'

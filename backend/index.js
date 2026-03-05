@@ -9,6 +9,7 @@ const axios = require('axios');
 const { listContainers, getContainerHealth } = require('./docker/client');
 const monitor = require('./docker/monitor');
 const healer = require('./docker/healer');
+const scalingPredictor = require('./docker/scaling-predictor');
 
 // RBAC Routes
 const authRoutes = require('./routes/auth.routes');
@@ -335,9 +336,32 @@ app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScal
   res.json(result);
 });
 
+// --- PREDICTION ENDPOINTS ---
+
+app.get('/api/predictions', (req, res) => {
+  const predictions = scalingPredictor.getPredictions();
+  res.json({ predictions, evaluatedAt: new Date().toISOString() });
+});
+
+app.get('/api/predictions/:id', validateId, (req, res) => {
+  const prediction = scalingPredictor.getPrediction(req.params.id);
+  if (!prediction) {
+    return res.status(404).json({ error: 'No prediction available for this container' });
+  }
+  res.json(prediction);
+});
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Sentinel Backend running on http://0.0.0.0:${PORT}`);
 });
 
 // Setup WebSocket
 wsBroadcaster = setupWebSocket(server);
+
+// Initialize Predictive Scaling Engine
+scalingPredictor.init(monitor, wsBroadcaster);
+
+// React to scale recommendations
+scalingPredictor.on('scale-recommendation', (prediction) => {
+  logActivity('alert', `🔮 Scale Alert: ${prediction.containerName} at ${Math.round(prediction.failureProbability * 100)}% failure risk — Recommendation: ${prediction.recommendation}`);
+});
