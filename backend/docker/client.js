@@ -1,5 +1,4 @@
 const Docker = require('dockerode');
-const { Client } = require('ssh2');
 
 /**
  * DockerHostManager manages multihost environment configurations and lifecycle.
@@ -10,16 +9,11 @@ class DockerHostManager {
   }
 
   async loadHosts(hostsConfig) {
-    for (const [id, hostData] of this.hosts.entries()) {
-      if (hostData.sshClient) hostData.sshClient.end();
-    }
     this.hosts.clear();
 
     for (const hostDef of hostsConfig) {
       try {
         let client;
-        let sshClient = null;
-
         if (hostDef.type === 'local') {
           client = new Docker({ socketPath: hostDef.socketPath || '/var/run/docker.sock' });
         } else if (hostDef.type === 'remote') {
@@ -43,7 +37,7 @@ class DockerHostManager {
         }
 
         await client.ping();
-        this.hosts.set(hostDef.id, { ...hostDef, client, sshClient, status: 'connected' });
+        this.hosts.set(hostDef.id, { ...hostDef, client, status: 'connected' });
       } catch (err) {
         console.error(`Failed to connect to Docker host ${hostDef.id}:`, err);
         this.hosts.set(hostDef.id, { ...hostDef, client: null, status: 'disconnected', error: err.message });
@@ -61,8 +55,10 @@ class DockerHostManager {
       return { hostId: parts[0], containerId: parts.slice(1).join(':') };
     }
     const hosts = this.getConnected();
-    const hostId = hosts.length > 0 ? hosts[0].id : 'local';
-    return { hostId, containerId: compoundId };
+    if (hosts.length === 1) {
+      return { hostId: hosts[0].id, containerId: compoundId };
+    }
+    throw new Error('Ambiguous container identifier: host prefix is required');
   }
 }
 
@@ -89,11 +85,11 @@ async function listContainers(filters = {}) {
         return containers.map(container => ({
           id: `${hostData.id}:${container.Id}`,
           displayId: container.Id.slice(0, 12),
-          name: container.Names[0].replace('/', ''),
+          name: container.Names?.[0]?.replace('/', '') || container.Id.slice(0, 12),
           image: container.Image,
           status: container.State,
-          health: container.Status.includes('unhealthy') ? 'unhealthy' :
-            container.Status.includes('healthy') ? 'healthy' : 'unknown',
+          health: (container.Status || '').includes('unhealthy') ? 'unhealthy' :
+            (container.Status || '').includes('healthy') ? 'healthy' : 'unknown',
           ports: container.Ports,
           created: new Date(container.Created * 1000),
           hostInfo: {

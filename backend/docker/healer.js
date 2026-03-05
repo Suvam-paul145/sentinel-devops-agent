@@ -6,6 +6,15 @@ const { generateFingerprint } = require('../lib/fingerprinting');
 const { storeIncident, findSimilar } = require('../db/incident-memory');
 const containerMonitor = require('./monitor');
 
+/**
+ * Safely extracts error message from any error type.
+ * @param {unknown} err - The error to extract message from
+ * @returns {string} The error message
+ */
+function getErrorMessage(err) {
+    return err instanceof Error ? err.message : String(err);
+}
+
 async function performSecurityPrecheck(compoundId) {
     try {
         const { hostId, containerId } = hostManager.parseId(compoundId);
@@ -25,9 +34,10 @@ async function performSecurityPrecheck(compoundId) {
         }
         return { blocked: false };
     } catch (e) {
-        console.error(`Security precheck failed for ${containerId}:`, e.message);
+        const errorMsg = getErrorMessage(e);
+        console.error(`Security precheck failed for ${compoundId}:`, errorMsg);
         // Fail open or closed? Usually fail closed for security.
-        return { blocked: true, error: `Security check error: ${e.message}` };
+        return { blocked: true, error: `Security check error: ${errorMsg}` };
     }
 }
 
@@ -92,24 +102,26 @@ async function restartContainer(compoundId) {
 
         return { action: 'restart', success: true, containerId: compoundId };
     } catch (error) {
-        console.error(`Failed to restart container ${compoundId}:`, error);
-        return { action: 'restart', success: false, containerId: compoundId, error: error.message };
+        const errorMsg = getErrorMessage(error);
+        console.error(`Failed to restart container ${compoundId}:`, errorMsg);
+        return { action: 'restart', success: false, containerId: compoundId, error: errorMsg };
     }
 }
 
 async function recreateContainer(compoundId) {
     try {
-        const container = docker.getContainer(containerId);
-        // Note: inspect is done inside performSecurityPrecheck, but recreate needs info later?
-        // Ah, duplicate inspect is better than polluting logic.
-        // Or reuse info? For now, keep it simple.
+        const { hostId, containerId } = hostManager.parseId(compoundId);
+        const hostData = hostManager.get(hostId);
+        if (!hostData || !hostData.client) throw new Error(`Host disconnected: ${hostId}`);
+
+        const container = hostData.client.getContainer(containerId);
 
         // --- Security Check ---
-        const securityCheck = await performSecurityPrecheck(containerId);
+        const securityCheck = await performSecurityPrecheck(compoundId);
         if (securityCheck.blocked) {
             const errorMsg = securityCheck.error;
             console.error(errorMsg);
-            return { action: 'recreate', success: false, containerId, error: errorMsg, blocked: true };
+            return { action: 'recreate', success: false, containerId: compoundId, error: errorMsg, blocked: true };
         }
         // ----------------------
 
@@ -140,20 +152,15 @@ async function recreateContainer(compoundId) {
 
         return { action: 'recreate', success: true, newId: `${hostId}:${newContainer.id}` };
     } catch (error) {
-        console.error(`Failed to recreate container ${compoundId}:`, error);
-        return { action: 'recreate', success: false, containerId: compoundId, error: error.message };
+        const errorMsg = getErrorMessage(error);
+        console.error(`Failed to recreate container ${compoundId}:`, errorMsg);
+        return { action: 'recreate', success: false, containerId: compoundId, error: errorMsg };
     }
 }
 
 async function scaleService(serviceName, replicas, hostId = 'local') {
     try {
-        let hostData = hostManager.get(hostId);
-        if (!hostData) {
-            const connected = hostManager.getConnected();
-            if (connected.length > 0) {
-                hostData = connected[0];
-            }
-        }
+        const hostData = hostManager.get(hostId);
         if (!hostData || !hostData.client) throw new Error(`Host disconnected: ${hostId}`);
 
         const service = hostData.client.getService(serviceName);
@@ -171,8 +178,9 @@ async function scaleService(serviceName, replicas, hostId = 'local') {
         });
         return { action: 'scale', replicas, success: true };
     } catch (error) {
-        console.error(`Failed to scale service ${serviceName}:`, error);
-        return { action: 'scale', replicas, success: false, error: error.message };
+        const errorMsg = getErrorMessage(error);
+        console.error(`Failed to scale service ${serviceName}:`, errorMsg);
+        return { action: 'scale', replicas, success: false, error: errorMsg };
     }
 }
 

@@ -22,9 +22,9 @@ async function listSwarmServices(dockerClient) {
         const services = await dockerClient.listServices();
         return services.map(svc => ({
             id: svc.ID,
-            name: svc.Spec.Name,
-            replicas: svc.Spec.Mode?.Replicated?.Replicas,
-            image: svc.Spec.TaskTemplate?.ContainerSpec?.Image,
+            name: svc.Spec?.Name || svc.ID,
+            replicas: svc.Spec?.Mode?.Replicated?.Replicas,
+            image: svc.Spec?.TaskTemplate?.ContainerSpec?.Image,
             state: svc.UpdateStatus?.State || 'running',
         }));
     } catch (err) {
