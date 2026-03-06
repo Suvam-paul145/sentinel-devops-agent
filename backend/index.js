@@ -748,7 +748,9 @@ app.post('/api/remote-agent/report', (req, res) => {
     }
     
     const hmac = crypto.createHmac('sha256', remoteAgentConfig.webhookSecret);
-    hmac.update(JSON.stringify(req.body));
+    // Use raw body for HMAC verification to ensure consistency
+    const bodyToVerify = req.rawBody || JSON.stringify(req.body);
+    hmac.update(bodyToVerify);
     const expectedSignature = 'sha256=' + hmac.digest('hex');
     
     // Check signature lengths first to avoid timingSafeEqual throwing on length mismatch

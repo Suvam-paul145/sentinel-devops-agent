@@ -58,12 +58,14 @@ export function ServiceCard({ service, prediction }: { service: Service; predict
             </div>
             
             {/* Cluster/Region Badge */}
-            {showClusterInfo && (
+            {showClusterInfo && (service.cluster || service.clusterName || service.region) && (
                 <div className="flex items-center gap-2 mb-3">
-                    <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground">
-                        <Server className="h-3 w-3" />
-                        <span>{service.clusterName || service.cluster}</span>
-                    </div>
+                    {(service.cluster || service.clusterName) && (
+                        <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground">
+                            <Server className="h-3 w-3" />
+                            <span>{service.clusterName || service.cluster}</span>
+                        </div>
+                    )}
                     {service.region && (
                         <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-muted text-xs text-muted-foreground">
                             <Globe className="h-3 w-3" />

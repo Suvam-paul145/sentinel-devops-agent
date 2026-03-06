@@ -161,6 +161,8 @@ function updateServiceStatus(serviceName, statusData) {
  */
 function getServicesGroupedByCluster() {
     const clusters = {};
+    
+    // Add static services from configuration
     for (const service of services) {
         const clusterId = service.cluster || 'default';
         if (!clusters[clusterId]) {
@@ -176,6 +178,27 @@ function getServicesGroupedByCluster() {
             ...systemStatus.services[service.name]
         });
     }
+    
+    // Add remote agent services
+    for (const [name, data] of Object.entries(systemStatus.services)) {
+        // Remote service format: "cluster:service"
+        if (name.includes(':')) {
+            const cluster = data.cluster || 'remote';
+            if (!clusters[cluster]) {
+                clusters[cluster] = {
+                    id: cluster,
+                    name: data.clusterName || cluster,
+                    region: data.region || 'remote',
+                    services: []
+                };
+            }
+            clusters[cluster].services.push({ 
+                name,
+                ...data 
+            });
+        }
+    }
+    
     return clusters;
 }
 
@@ -185,6 +208,8 @@ function getServicesGroupedByCluster() {
  */
 function getServicesGroupedByRegion() {
     const regions = {};
+    
+    // Add static services from configuration
     for (const service of services) {
         const regionId = service.region || 'default';
         if (!regions[regionId]) {
@@ -198,6 +223,25 @@ function getServicesGroupedByRegion() {
             ...systemStatus.services[service.name]
         });
     }
+    
+    // Add remote agent services
+    for (const [name, data] of Object.entries(systemStatus.services)) {
+        // Remote service format: "cluster:service"
+        if (name.includes(':')) {
+            const regionId = data.region || 'remote';
+            if (!regions[regionId]) {
+                regions[regionId] = {
+                    region: regionId,
+                    services: []
+                };
+            }
+            regions[regionId].services.push({
+                name,
+                ...data
+            });
+        }
+    }
+    
     return regions;
 }
 
@@ -230,7 +274,7 @@ function handleRemoteAgentReport(report) {
         }
         
         const prevStatus = systemStatus.services[fullServiceName].status;
-        const newStatus = serviceData.status;
+        const newStatus = String(serviceData.status || 'unknown');
         
         // Log status changes
         if (newStatus === 'healthy' && prevStatus !== 'healthy' && prevStatus !== 'unknown') {
