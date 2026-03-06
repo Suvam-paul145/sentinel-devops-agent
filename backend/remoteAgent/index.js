@@ -28,8 +28,44 @@ const config = {
   clusterName: process.env.CLUSTER_NAME || 'Remote Agent',
   region: process.env.REGION || 'unknown',
   reportIntervalMs: parseInt(process.env.REPORT_INTERVAL_MS || '30000', 10),
-  localServicesConfig: process.env.LOCAL_SERVICES ? JSON.parse(process.env.LOCAL_SERVICES) : []
+  localServicesConfig: (() => {
+    try {
+      return process.env.LOCAL_SERVICES ? JSON.parse(process.env.LOCAL_SERVICES) : [];
+    } catch (e) {
+      console.warn('Invalid LOCAL_SERVICES, using empty array:', e.message);
+      return [];
+    }
+  })(),
+  // Add ADMIN_SECRET for protecting /configure and /refresh endpoints
+  adminSecret: process.env.ADMIN_SECRET || ''
 };
+
+/**
+ * Authentication middleware for admin endpoints
+ */
+function requireAdminAuth(req, res, next) {
+  if (!config.adminSecret) {
+    // If no admin secret configured, allow access (backward compatible)
+    return next();
+  }
+  
+  const authHeader = req.headers['x-admin-secret'] || req.headers['authorization'];
+  if (!authHeader) {
+    return res.status(401).json({ 
+      error: 'Authentication required',
+      message: 'Set X-Admin-Secret header or provide Authorization header'
+    });
+  }
+  
+  // Support both "Bearer token" and raw token
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
+  
+  if (token !== config.adminSecret) {
+    return res.status(403).json({ error: 'Invalid credentials' });
+  }
+  
+  next();
+}
 
 // In-memory health state
 let healthState = {
@@ -164,8 +200,9 @@ app.get('/metrics', (req, res) => {
 
 /**
  * POST /refresh - Trigger immediate health check
+ * Protected by admin authentication
  */
-app.post('/refresh', async (req, res) => {
+app.post('/refresh', requireAdminAuth, async (req, res) => {
   try {
     const results = await checkAllServices();
     res.json({
@@ -183,8 +220,9 @@ app.post('/refresh', async (req, res) => {
 
 /**
  * POST /configure - Update local services configuration
+ * Protected by admin authentication
  */
-app.post('/configure', (req, res) => {
+app.post('/configure', requireAdminAuth, (req, res) => {
   const { services } = req.body;
   
   if (!Array.isArray(services)) {
@@ -259,7 +297,8 @@ module.exports = {
   reportToCentral,
   generateSignature,
   config,
-  startAgent
+  startAgent,
+  requireAdminAuth
 };
 
 // Run if executed directly

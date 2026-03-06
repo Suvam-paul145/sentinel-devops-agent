@@ -40,7 +40,10 @@ const RemoteAgentsSchema = z.object({
   enabled: z.boolean().default(false),
   webhookSecret: z.string().optional().default(''),
   endpoints: z.array(RemoteAgentEndpointSchema).default([])
-});
+}).refine(
+  data => !data.enabled || data.webhookSecret.trim() !== '',
+  { message: 'webhookSecret required when enabled is true' }
+);
 
 const ServicesConfigSchema = z.object({
   clusters: z.array(ClusterSchema).min(1, 'At least one cluster is required'),
@@ -231,7 +234,7 @@ function getRemoteAgentConfig() {
 
 /**
  * Get service port mapping for backward compatibility
- * @returns {Object} Service name to port mapping
+ * @returns {Object} Service name to port mapping with namespaced keys
  */
 function getServicePortMap() {
   const services = getAllServices();
@@ -239,7 +242,9 @@ function getServicePortMap() {
   
   for (const service of services) {
     if (service.port) {
-      portMap[service.name] = service.port;
+      // Use namespaced keys to avoid collisions between clusters
+      const key = service.cluster ? `${service.cluster}:${service.name}` : service.name;
+      portMap[key] = service.port;
     }
   }
   
