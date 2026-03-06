@@ -23,11 +23,17 @@ const vault = require('node-vault');
 const secretCache = new Map();
 // Cache TTL is configurable via environment variable (default: 2 minutes for better secret rotation responsiveness)
 const DEFAULT_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
-const SECRET_CACHE_TTL_MS = parseInt(process.env.SECRET_CACHE_TTL_MS || DEFAULT_CACHE_TTL_MS, 10);
+const rawTtl = process.env.SECRET_CACHE_TTL_MS;
+const parsedTtl = rawTtl ? parseInt(rawTtl, 10) : DEFAULT_CACHE_TTL_MS;
+const SECRET_CACHE_TTL_MS = Number.isFinite(parsedTtl) && parsedTtl >= 0
+  ? parsedTtl
+  : DEFAULT_CACHE_TTL_MS;
 
 // Vault client instance (lazily initialized)
 let vaultClient = null;
 let vaultAvailable = null; // null = not checked, true/false = checked
+let vaultAvailabilityCheckedAt = 0;
+const VAULT_AVAILABILITY_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Vault configuration from environment
 const VAULT_ADDR = process.env.VAULT_ADDR || 'http://127.0.0.1:8200';
@@ -60,16 +66,19 @@ function initVaultClient() {
 
 /**
  * Check if Vault is available and accessible
+ * Re-checks periodically (every 5 minutes) so that Vault recovery is detected.
  * @returns {Promise<boolean>} - True if Vault is available
  */
 async function checkVaultAvailability() {
-  if (vaultAvailable !== null) {
+  const now = Date.now();
+  if (vaultAvailable !== null && now - vaultAvailabilityCheckedAt < VAULT_AVAILABILITY_TTL_MS) {
     return vaultAvailable;
   }
 
   if (!VAULT_TOKEN) {
     console.log('🔐 Vault: No VAULT_TOKEN configured, using environment variables');
     vaultAvailable = false;
+    vaultAvailabilityCheckedAt = now;
     return false;
   }
 
@@ -77,13 +86,40 @@ async function checkVaultAvailability() {
     const client = initVaultClient();
     // Check Vault health status
     await client.health();
-    console.log('🔐 Vault: Connected successfully to', VAULT_ADDR);
-    vaultAvailable = true;
-    return true;
+
+    // Verify token can access secret path
+    try {
+      await client.read(VAULT_SECRET_PATH);
+      console.log('🔐 Vault: Connected successfully to', VAULT_ADDR);
+      vaultAvailable = true;
+      vaultAvailabilityCheckedAt = now;
+      return true;
+    } catch (authError) {
+      const statusCode = authError?.response?.statusCode;
+
+      if (statusCode === 404) {
+        // Secret path doesn't exist yet, but token is valid
+        console.log('🔐 Vault: Secret path not found, but token is valid');
+        vaultAvailable = true;
+        vaultAvailabilityCheckedAt = now;
+        return true;
+      }
+
+      if (statusCode === 401 || statusCode === 403) {
+        console.log('🔐 Vault: Token not authorized to access secret path');
+      } else {
+        console.log('🔐 Vault: Error verifying access:', authError.message);
+      }
+
+      vaultAvailable = false;
+      vaultAvailabilityCheckedAt = now;
+      return false;
+    }
   } catch (error) {
     console.log('🔐 Vault: Not available, falling back to environment variables');
     console.log(`   Reason: ${error.message}`);
     vaultAvailable = false;
+    vaultAvailabilityCheckedAt = now;
     return false;
   }
 }
@@ -228,6 +264,8 @@ async function preloadSecrets(keys) {
 function clearCache() {
   secretCache.clear();
   vaultAvailable = null;
+  vaultAvailabilityCheckedAt = 0;
+  vaultClient = null;
 }
 
 /**

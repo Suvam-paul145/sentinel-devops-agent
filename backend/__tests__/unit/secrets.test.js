@@ -96,16 +96,18 @@ describe('Secrets Module - Unit Tests', () => {
     });
 
     it('should fall back to env when Vault is not reachable', async () => {
+      // Set env BEFORE requiring module so VAULT_TOKEN constant is populated
       process.env.VAULT_TOKEN = 'invalid-token';
       process.env.JWT_TEST = 'env-jwt-secret';
-      
-      // Clear cache to reset vault availability check
-      secrets.clearCache();
-      
-      const value = await secrets.fetchSecret('JWT_TEST');
-      
+
+      jest.resetModules();
+      const freshSecrets = require('../../lib/secrets');
+      freshSecrets.clearCache();
+
+      const value = await freshSecrets.fetchSecret('JWT_TEST');
+
       expect(value).toBe('env-jwt-secret');
-      expect(secrets.getSecretSource('JWT_TEST')).toBe('env');
+      expect(freshSecrets.getSecretSource('JWT_TEST')).toBe('env');
     });
   });
 
@@ -213,16 +215,17 @@ describe('Secrets Module - Unit Tests', () => {
     });
 
     it('should return false when Vault is not reachable', async () => {
+      // Set env BEFORE requiring module so VAULT_TOKEN constant is populated
       process.env.VAULT_TOKEN = 'test-token';
-      // Vault is not running, so it should return false
-      
-      // Clear cache to reset vault availability check
-      secrets.clearCache();
-      
-      await secrets.checkVaultAvailability();
-      
+
+      jest.resetModules();
+      const freshSecrets = require('../../lib/secrets');
+      freshSecrets.clearCache();
+
+      await freshSecrets.checkVaultAvailability();
+
       // Without a running Vault, this should be false
-      expect(secrets.isVaultEnabled()).toBe(false);
+      expect(freshSecrets.isVaultEnabled()).toBe(false);
     });
   });
 });
