@@ -98,7 +98,9 @@ async function checkVaultAvailability() {
       const statusCode = authError?.response?.statusCode;
 
       if (statusCode === 404) {
-        // Secret path doesn't exist yet, but token is valid
+        // Secret path doesn't exist yet (hasn't been initialized with secrets).
+        // A 404 means the token was accepted by Vault (401/403 would be returned
+        // for unauthorized tokens), so we treat Vault as available.
         console.log('🔐 Vault: Secret path not found, but token is valid');
         vaultAvailable = true;
         vaultAvailabilityCheckedAt = now;
@@ -258,8 +260,9 @@ async function preloadSecrets(keys) {
 }
 
 /**
- * Clear the secret cache
- * Useful for testing or when secrets need to be refreshed
+ * Clear the secret cache and reset all Vault-related state
+ * Resets: cached secrets, Vault availability status, availability check timestamp,
+ * and the Vault client instance. Useful for testing or when secrets need to be refreshed.
  */
 function clearCache() {
   secretCache.clear();
