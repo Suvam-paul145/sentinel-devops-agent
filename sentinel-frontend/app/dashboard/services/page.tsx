@@ -10,7 +10,7 @@ import { filterItems } from "@/lib/utils";
 import { Plus, Inbox } from "lucide-react";
 
 export default function ServicesPage() {
-    const { containers, restartContainer, loading } = useContainers();
+    const { containers, restartContainer, loading, error } = useContainers();
     const [searchQuery, setSearchQuery] = useState("");
 
     const filteredContainers = useMemo(() => {
@@ -43,6 +43,11 @@ export default function ServicesPage() {
                     {loading ? (
                         <div className="flex items-center justify-center p-12 text-muted-foreground animate-pulse">
                             Loading containers...
+                        </div>
+                    ) : error ? (
+                        <div className="flex flex-col items-center justify-center py-20 px-4 text-center border rounded-xl bg-card border-border">
+                            <h3 className="text-lg font-semibold mb-2">Failed to load containers</h3>
+                            <p className="text-muted-foreground max-w-sm text-sm">{error}</p>
                         </div>
                     ) : (
                         <>
