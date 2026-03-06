@@ -135,7 +135,7 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
                                                         {formatDistanceToNow(notification.timestamp, { addSuffix: true })}
                                                     </span>
                                                 </div>
-                                                <p className="text-xs text-muted-foreground mt-1 leading-relaxed wrap-break-word">
+                                                <p className="text-xs text-muted-foreground mt-1 leading-relaxed break-words">
                                                     {notification.message}
                                                 </p>
                                             </div>
