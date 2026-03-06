@@ -59,13 +59,34 @@ Sentinel uses HashiCorp Vault for secure secret management. In development, Vaul
 Backend Startup
       │
       ▼
-secrets.js: fetchSecret('JWT_SECRET')
+secretsInit.js: initializeSecrets()
       │
-      ├── Vault available? ──YES──► Vault KV Store ──► return secret
+      ▼
+secrets.js: preloadSecrets([...keys])
+      │  (populates cache via fetchSecret for each key)
+      │
+      ▼
+fetchSecret(key)
+      │
+      ├── Cache hit (within TTL)? ──YES──► return cached value
+      │
+      ├── Vault available? ──YES──► Vault KV Store ──► cache + return secret
       │                                                  (+ audit log)
-      └── Vault unavailable? ──► process.env.JWT_SECRET ──► return secret
+      └── Vault unavailable? ──► process.env[key] ──► cache + return secret
                                   (dev/fallback only)
+
+Module Initialization (require-time):
+      │
+      ▼
+getSecretSync(key) ──► cache hit? ──YES──► return cached value
+                       │
+                       └── NO ──► process.env[key] ──► return value
 ```
+
+**Note:** Module-level constants (e.g., `JWT_SECRET` in AuthService, DB config) use
+`getSecretSync()` which reads from the pre-loaded cache or falls back to environment
+variables. The cache is populated by `initializeSecrets()` at startup before the
+server starts listening.
 
 ### Starting Vault (Development Mode)
 
