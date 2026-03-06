@@ -119,7 +119,7 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
                                             )}
                                         >
                                             {/* Status Icon */}
-                                            <div className="flex-shrink-0 mt-0.5">
+                                            <div className="shrink-0 mt-0.5">
                                                 <NotificationIcon type={notification.type} />
                                             </div>
 
@@ -135,7 +135,7 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
                                                         {formatDistanceToNow(notification.timestamp, { addSuffix: true })}
                                                     </span>
                                                 </div>
-                                                <p className="text-xs text-muted-foreground mt-1 leading-relaxed break-words">
+                                                <p className="text-xs text-muted-foreground mt-1 leading-relaxed wrap-break-word">
                                                     {notification.message}
                                                 </p>
                                             </div>
