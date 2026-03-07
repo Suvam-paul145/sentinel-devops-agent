@@ -217,7 +217,7 @@ async function analyzeSystemHealth() {
     // Persist to PostgreSQL (fire-and-forget)
     insertAIReport(report, report).catch(() => { });
 
-    wsBroadcaster.broadcast('INCIDENT_NEW', insight);
+    wsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', insight);
     wsBroadcaster.broadcast('METRICS', systemStatus);
     logActivity('info', 'AI Root Cause Analysis completed');
   } catch (error) {
@@ -367,8 +367,8 @@ app.post('/api/kestra-webhook', (req, res) => {
 
     logActivity('info', 'Received new AI Analysis report');
 
-    // Broadcast new incident/insight
-    wsBroadcaster.broadcast('INCIDENT_NEW', insight);
+    // Broadcast new incident/insight using dedicated AI event
+    wsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', insight);
 
     // Call routeEvent with the incident payload for ChatOps
     initiateHealingProtocol({
@@ -383,7 +383,7 @@ app.post('/api/kestra-webhook', (req, res) => {
     incidents.logActivity('info', 'Received new AI Analysis report');
 
     if (globalWsBroadcaster) {
-      globalWsBroadcaster.broadcast('INCIDENT_NEW', newInsight);
+      globalWsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', newInsight);
     }
   }
   systemStatus.lastUpdated = new Date();
