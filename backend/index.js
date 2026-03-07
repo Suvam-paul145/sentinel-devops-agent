@@ -572,18 +572,21 @@ app.get('/api/docker/containers', requireAuth, async (req, res) => {
     // Broadcast container updates to all WebSocket clients
     wsBroadcaster.broadcast('CONTAINER_UPDATE', { containers: enrichedContainers });
 
-    // Include host summary in response (safe fields only - no credentials)
-    const hostSummary = hostManager.getAll().map(h => ({
+    // Include host summary only for Admin users (prevents host topology leakage)
+    const isAdmin = req.user?.roles?.includes('Admin');
+    const hostSummary = isAdmin ? hostManager.getAll().map(h => ({
       id: h.id,
       label: h.label,
       status: h.status,
       containersRunning: h.containersRunning || 0
-    }));
+    })) : undefined;
 
-    res.json({ 
-      containers: enrichedContainers,
-      hosts: hostSummary
-    });
+    const response = { containers: enrichedContainers };
+    if (hostSummary) {
+      response.hosts = hostSummary;
+    }
+
+    res.json(response);
   } catch (error) {
     if (error.statusCode) {
       return res.status(error.statusCode).json({ error: { code: error.code, message: error.message } });
