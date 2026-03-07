@@ -1,4 +1,7 @@
 const { docker } = require('./client');
+const flapDetector = require('../lib/flap-detector');
+const alertCorrelator = require('../lib/alert-correlator');
+const dependencyGraph = require('../lib/dependency-graph');
 const { scanImage } = require('../security/scanner');
 const EventEmitter = require('events');
 const metricsStore = require('../db/metrics-store');
@@ -8,6 +11,11 @@ class ContainerMonitor extends EventEmitter {
     constructor() {
         super();
         this.metrics = new Map();
+        this.watchers = new Map();
+        this.healthTimers = new Map();
+        this.containerLabels = new Map();
+        this.containerInfoCache = new Map(); // Full inspect data for dependency graph
+        this.lastHealthState = new Map();
         this.pollingInterval = 30000; // 30 seconds default
         this.isRunning = false;
         this.isPolling = false;
@@ -122,6 +130,13 @@ class ContainerMonitor extends EventEmitter {
                     this.restartCounts.set(containerId, data.RestartCount || 0);
                     this.containerNames.set(containerId, data.Name.replace(/^\//, ''));
 
+                    // Smart Branch: Labels and Cache
+                    this.containerLabels.set(containerId, data.Config.Labels || {});
+                    this.containerInfoCache.set(containerId, data);
+
+                    // Rebuild dependency graph
+                    dependencyGraph.populateFromContainers([...this.containerInfoCache.values()]);
+
                     // Check if security scan needed
                     if (!this.securityTimers.has(containerId)) {
                         this.scheduleSecurityScan(containerId, data.Image);
@@ -135,7 +150,6 @@ class ContainerMonitor extends EventEmitter {
             this.metrics.set(containerId, parsed);
 
             // 3. Push to Metrics Store & Predict (matches upstream frequency Logic: 5s)
-            // Even if global poll is 30s, we push what we have when we poll.
             metricsStore.push(containerId, {
                 cpuPercent: parsed.raw.cpuPercent,
                 memPercent: parsed.raw.memPercent,
@@ -146,6 +160,9 @@ class ContainerMonitor extends EventEmitter {
             if (prediction && prediction.probability > 0.3) {
                 this.emit('prediction', { ...prediction, containerName: this.containerNames.get(containerId) });
             }
+
+            // 4. Smart Branch: Health Check
+            await this.checkContainerHealth(containerId);
 
         } catch (error) {
             // Container likely disappeared
@@ -161,6 +178,17 @@ class ContainerMonitor extends EventEmitter {
         this.lastInspectTimes.delete(containerId);
         this.lastPredictTimes.delete(containerId);
         metricsStore.clear(containerId);
+
+        // Smart Branch Cleanup
+        if (this.healthTimers.has(containerId)) {
+            clearInterval(this.healthTimers.get(containerId));
+            this.healthTimers.delete(containerId);
+        }
+        this.containerLabels.delete(containerId);
+        this.lastHealthState.delete(containerId);
+        this.containerInfoCache.delete(containerId);
+        flapDetector.clear(containerId);
+        dependencyGraph.clearContainer(containerId);
 
         if (this.securityTimers.has(containerId)) {
             clearInterval(this.securityTimers.get(containerId));
@@ -232,6 +260,48 @@ class ContainerMonitor extends EventEmitter {
 
     getMetrics(containerId) {
         return this.metrics.get(containerId);
+    }
+
+    async checkContainerHealth(containerId) {
+        try {
+            const container = docker.getContainer(containerId);
+            const info = await container.inspect();
+
+            // Determine if truly unhealthy (from docker healthcheck or state)
+            const isRunning = info.State.Running;
+            const healthStatus = info.State.Health ? info.State.Health.Status : (isRunning ? 'healthy' : 'unhealthy');
+            const isHealthy = healthStatus === 'healthy' || healthStatus === 'starting';
+
+            const lastState = this.lastHealthState.get(containerId);
+            if (lastState !== isHealthy) {
+                this.lastHealthState.set(containerId, isHealthy);
+
+                // State changed! Run through flap detector
+                const flapResult = flapDetector.record(containerId, isHealthy);
+
+                if (!isHealthy && !flapResult.suppressAlert) {
+                    // Generate an alert and pass to correlator
+                    const labels = this.containerLabels.get(containerId) || {};
+                    const alert = { containerId, labels, type: 'container_failure', isHealthy };
+                    alertCorrelator.add(alert);
+                }
+            }
+        } catch (error) {
+            if (error.statusCode === 404) {
+                // Container is confirmed gone — stop polling
+                console.warn(`Container ${containerId} no longer exists, stopping monitoring.`);
+                this.cleanup(containerId);
+            } else {
+                // console.error(`Health check failed for ${containerId}:`, error.message);
+            }
+        }
+    }
+
+    getCorrelatedGroups() {
+        // Re-derive from correlator on each call. Now that groupId is
+        // deterministic, this is safe and keeps data current (respects
+        // the 60-second correlation window, auto-expiring recovered groups).
+        return alertCorrelator.correlate();
     }
 }
 

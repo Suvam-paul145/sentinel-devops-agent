@@ -67,6 +67,7 @@ const { startCollectors } = require('./metrics/collectors');
 const authRoutes = require('./routes/auth.routes');
 const usersRoutes = require('./routes/users.routes');
 const rolesRoutes = require('./routes/roles.routes');
+const incidentsRoutes = require('./routes/incidents.routes');
 const approvalsRoutes = require('./routes/approvals.routes');
 const kubernetesRoutes = require('./routes/kubernetes.routes');
 const { apiLimiter } = require('./middleware/rateLimiter');
@@ -120,6 +121,7 @@ app.use(express.urlencoded({
 app.use('/auth', authRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/roles', rolesRoutes);
+app.use('/api/incidents', incidentsRoutes);
 app.use('/api/approvals', approvalsRoutes);
 
 // FinOps Routes
@@ -148,6 +150,9 @@ let systemStatus = {
 let activityLog = [];
 let aiLogs = [];
 let nextLogId = 1;
+
+// Expose aiLogs to route handlers (used by /api/incidents/correlated)
+app.locals.aiLogs = aiLogs;
 
 function logActivity(type, message) {
   const entry = {
