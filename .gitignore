@@ -159,3 +159,12 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+
+# Repair/debug scripts
+**/auto-repair.js
+**/robust-repair.js
+**/patch-lock.js
+**/repair-json.js
+
+# Lockfile variants
+package-lock.json.*
