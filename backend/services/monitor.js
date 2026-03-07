@@ -14,6 +14,8 @@ let isChecking = false;
 // Load services dynamically from configuration
 const configuredServices = getAllServices();
 
+let systemStatus = null;
+
 // Initialize system status from configuration
 function initializeSystemStatus() {
   const svcMap = {};
@@ -38,7 +40,7 @@ function initializeSystemStatus() {
   return systemStatus;
 }
 
-let systemStatus = initializeSystemStatus();
+initializeSystemStatus();
 
 // Get flat services array from configuration
 const services = configuredServices.map(s => ({
