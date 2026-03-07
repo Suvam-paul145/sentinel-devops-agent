@@ -264,11 +264,9 @@ function getServicesGroupedByCluster() {
     }
     
     // Add remote agent services not in static config
+    const staticClusterKeys = new Set(services.map(s => `${s.cluster}:${s.name}`));
     for (const [key, data] of Object.entries(systemStatus.services)) {
-        if (key.includes(':')) {
-            const existsInStatic = services.some(s => `${s.cluster}:${s.name}` === key);
-            if (existsInStatic) continue;
-            
+        if (key.includes(':') && !staticClusterKeys.has(key)) {
             const cluster = data.cluster || 'remote';
             if (!clusters[cluster]) {
                 clusters[cluster] = {
@@ -312,11 +310,9 @@ function getServicesGroupedByRegion() {
     }
     
     // Add remote agent services not in static config
+    const staticRegionKeys = new Set(services.map(s => `${s.cluster}:${s.name}`));
     for (const [key, data] of Object.entries(systemStatus.services)) {
-        if (key.includes(':')) {
-            const existsInStatic = services.some(s => `${s.cluster}:${s.name}` === key);
-            if (existsInStatic) continue;
-            
+        if (key.includes(':') && !staticRegionKeys.has(key)) {
             const regionId = data.region || 'remote';
             if (!regions[regionId]) {
                 regions[regionId] = {
