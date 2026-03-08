@@ -5,7 +5,7 @@ import { Spotlight } from "@/components/common/Spotlight";
 import { CopyButton } from "@/components/common/CopyButton";
 
 export interface AIInsightItem {
-    id: number;
+    id: string;
     analysis: string;
     metrics?: Record<string, { code: number }>;
     summary?: string;
