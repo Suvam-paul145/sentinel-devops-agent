@@ -109,31 +109,46 @@ export function Footer() {
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
                         transition={{ duration: 0.5, delay: 0.15 }}
+                        className="space-y-4"
                     >
                         <h3 className="text-sm font-semibold text-white uppercase tracking-wider mb-4">
                             Get in Touch
                         </h3>
-                        <div className="space-y-3">
-                            <div className="flex items-center gap-2">
-                                <Mail className="h-4 w-4 text-cyan-400/70" />
-                                <a
-                                    href="mailto:contact@sentinel.dev"
-                                    className="text-sm text-zinc-400 hover:text-cyan-400 transition-colors duration-200"
-                                >
-                                    contact@sentinel.dev
-                                </a>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <Github className="h-4 w-4 text-cyan-400/70" />
-                                <a
-                                    href="https://github.com/vallabhatech/sentinel-devops-agent"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-sm text-zinc-400 hover:text-cyan-400 transition-colors duration-200"
-                                >
-                                    GitHub Repository
-                                </a>
-                            </div>
+                        <div className="space-y-4">
+                            <a
+                                href="mailto:contact@sentinel.dev"
+                                className="flex items-center gap-3 group"
+                            >
+                                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/5 border border-white/10 text-cyan-400 group-hover:border-cyan-500/30 group-hover:bg-cyan-500/10 transition-all duration-300">
+                                    <Mail className="h-4 w-4" />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-medium text-white group-hover:text-cyan-400 transition-colors duration-200">
+                                        Email Us
+                                    </span>
+                                    <span className="text-xs text-zinc-500">
+                                        contact@sentinel.dev
+                                    </span>
+                                </div>
+                            </a>
+                            <a
+                                href="https://github.com/vallabhatech/sentinel-devops-agent"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-3 group"
+                            >
+                                <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-white/5 border border-white/10 text-cyan-400 group-hover:border-cyan-500/30 group-hover:bg-cyan-500/10 transition-all duration-300">
+                                    <Github className="h-4 w-4" />
+                                </div>
+                                <div className="flex flex-col">
+                                    <span className="text-sm font-medium text-white group-hover:text-cyan-400 transition-colors duration-200">
+                                        GitHub
+                                    </span>
+                                    <span className="text-xs text-zinc-500">
+                                        View Repository
+                                    </span>
+                                </div>
+                            </a>
                         </div>
                     </motion.div>
 
