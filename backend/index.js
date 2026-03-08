@@ -1,9 +1,29 @@
 // Load environment variables
 require('dotenv').config();
 
-// Validate configuration before starting
+// Validate secure secrets in production
+const { validateEnvSecrets } = require('./utils/envValidator');
+try {
+  validateEnvSecrets();
+} catch (error) {
+  console.error('\n' + '='.repeat(80));
+  console.error('🚨 CRITICAL SECURITY ERROR 🚨');
+  console.error('='.repeat(80));
+  console.error(error.message);
+  console.error('='.repeat(80));
+  console.error('\nApplication cannot start with insecure configuration.\n');
+  console.error('Please fix the issues above and restart the application.\n');
+  process.exit(1);
+}
+
+// Validate configuration and provide development warnings
 const { validateConfig } = require('./config/validator');
 validateConfig({ exitOnError: process.env.NODE_ENV === 'production' });
+
+// Provide development warnings for placeholder values (non-blocking)
+if (process.env.NODE_ENV !== 'production') {
+  validateForDevelopment();
+}
 const { setupWebSocket } = require('./websocket');
 const express = require('express');
 const { ERRORS } = require('./lib/errors');
@@ -19,6 +39,7 @@ const { v4: uuidv4 } = require('uuid');
 const { insertActivityLog, getActivityLogs, insertAIReport, getAIReports } = require('./db/logs');
 const { routeEvent } = require('./config/notifications');
 const { handleDatabaseError } = require('./utils/errorHandler');
+const { validateForDevelopment } = require('./utils/envValidator');
 
 const pendingApprovals = new Map();
 
