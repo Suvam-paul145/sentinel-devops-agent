@@ -14,6 +14,7 @@ const { listContainers, getContainerHealth } = require('./docker/client');
 const containerMonitor = require('./docker/monitor');
 const healer = require('./docker/healer');
 const scalingPredictor = require('./docker/scaling-predictor');
+const aiService = require('./ai');
 const { insertActivityLog, getActivityLogs, insertAIReport, getAIReports } = require('./db/logs');
 const { routeEvent } = require('./config/notifications');
 
@@ -188,6 +189,54 @@ const GRACE_PERIOD_MS = 60 * 1000; // 1 minute
 
 // Continuous health checking
 let isChecking = false;
+let isAnalyzing = false;
+let needsAnotherRun = false;
+
+/**
+ * Performs root cause analysis in the background
+ */
+async function analyzeSystemHealth() {
+  if (isAnalyzing) {
+    needsAnotherRun = true;
+    return;
+  }
+
+  isAnalyzing = true;
+  needsAnotherRun = false;
+  systemStatus.aiAnalysis = "Analyzing system health...";
+  wsBroadcaster.broadcast('METRICS', systemStatus);
+
+  try {
+    const report = await aiService.performAnalysis(systemStatus.services);
+    systemStatus.aiAnalysis = report;
+
+    const insight = {
+      id: Date.now(),
+      timestamp: new Date(),
+      analysis: report,
+      summary: report
+    };
+    aiLogs.unshift(insight);
+    if (aiLogs.length > 50) aiLogs.pop();
+
+    // Persist to PostgreSQL (fire-and-forget)
+    insertAIReport(report, report).catch(() => { });
+
+    wsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', insight);
+    wsBroadcaster.broadcast('METRICS', systemStatus);
+    logActivity('info', 'AI Root Cause Analysis completed');
+  } catch (error) {
+    logActivity('error', `AI Analysis failed: ${error.message}`);
+    systemStatus.aiAnalysis = `AI Analysis failed: ${error.message}. Please check logs.`;
+    wsBroadcaster.broadcast('METRICS', systemStatus);
+  } finally {
+    isAnalyzing = false;
+    // If state changed during analysis, run again to capture latest context
+    if (needsAnotherRun) {
+      setTimeout(() => analyzeSystemHealth(), 1000);
+    }
+  }
+}
 
 async function checkServiceHealth() {
   if (isChecking) return;
@@ -255,6 +304,14 @@ async function checkServiceHealth() {
       systemStatus.lastUpdated = new Date();
       // Broadcast full metrics update
       wsBroadcaster.broadcast('METRICS', systemStatus);
+
+      // Trigger AI Analysis in the background if there are failures
+      const hasFailures = Object.values(systemStatus.services).some(s => s.status !== 'healthy');
+      if (hasFailures) {
+        analyzeSystemHealth().catch(err => {
+          logActivity('error', `Background AI Analysis trigger failed: ${err.message}`);
+        });
+      }
     }
   } finally {
     isChecking = false;
@@ -315,8 +372,8 @@ app.post('/api/kestra-webhook', (req, res) => {
 
     logActivity('info', 'Received new AI Analysis report');
 
-    // Broadcast new incident/insight
-    wsBroadcaster.broadcast('INCIDENT_NEW', insight);
+    // Broadcast new incident/insight using dedicated AI event
+    wsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', insight);
 
     // Call routeEvent with the incident payload for ChatOps
     initiateHealingProtocol({
@@ -331,7 +388,7 @@ app.post('/api/kestra-webhook', (req, res) => {
     incidents.logActivity('info', 'Received new AI Analysis report');
 
     if (globalWsBroadcaster) {
-      globalWsBroadcaster.broadcast('INCIDENT_NEW', newInsight);
+      globalWsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', newInsight);
     }
   }
   systemStatus.lastUpdated = new Date();
