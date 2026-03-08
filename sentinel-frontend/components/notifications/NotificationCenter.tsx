@@ -6,6 +6,7 @@ import { X, CheckCircle, AlertTriangle, Info, AlertOctagon, Trash2, Check, Bell 
 import { useNotifications, Notification } from "@/hooks/useNotifications";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
+import { CopyButton } from "@/components/common/CopyButton";
 
 const NotificationIcon = ({ type }: { type: Notification["type"] }) => {
     switch (type) {
@@ -135,9 +136,14 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
                                                         {formatDistanceToNow(notification.timestamp, { addSuffix: true })}
                                                     </span>
                                                 </div>
-                                                <p className="text-xs text-muted-foreground mt-1 leading-relaxed break-words">
-                                                    {notification.message}
-                                                </p>
+                                                <div className="relative group overflow-visible pr-10">
+                                                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed wrap-break-word">
+                                                        {notification.message}
+                                                    </p>
+                                                    <div className="absolute top-1 right-1 z-10">
+                                                        <CopyButton textToCopy={notification.message} className="opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-within:opacity-100" />
+                                                    </div>
+                                                </div>
                                             </div>
 
                                             {/* Individual Delete Action (Hidden by default, visible on hover) */}
