@@ -6,6 +6,7 @@ import { ServiceGrid } from "@/components/dashboard/ServiceGrid";
 import { MetricsCharts } from "@/components/dashboard/MetricsCharts";
 import { IncidentTimeline } from "@/components/dashboard/IncidentTimeline";
 import { AgentReasoningPanel } from "@/components/dashboard/AgentReasoningPanel";
+import { HealthForecast } from "@/components/dashboard/HealthForecast";
 import { mockServices } from "@/lib/mockData";
 import { useMetrics } from "@/hooks/useMetrics";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -292,6 +293,9 @@ export default function DashboardPage() {
                                     <p className="text-sm mt-1">Containers with label <code className="bg-muted px-1 rounded">sentinel.monitor=true</code> will appear here.</p>
                                 </div>
                             )}
+
+                            {/* Predictive Health Forecast */}
+                            <HealthForecast />
                         </div>
 
                         {/* Right Column: Timeline & Reasoning (1/3 width) */}
@@ -302,7 +306,7 @@ export default function DashboardPage() {
                                     <div className="flex items-center justify-between mb-2">
                                         <h2 className="text-lg font-semibold text-primary">Sentinel AI Analysis</h2>
                                         <button
-                                            onClick={() => setActiveIncidentId(null)}
+                                            onClick={handleCloseReasoning}
                                             className="text-xs text-muted-foreground hover:text-foreground"
                                         >
                                             Close
@@ -320,7 +324,7 @@ export default function DashboardPage() {
                                 ) : (
                                     <IncidentTimeline
                                         incidents={incidents}
-                                        onViewReasoning={(id) => setActiveIncidentId(id)}
+                                        onViewReasoning={handleViewReasoning}
                                     />
                                 )}
                             </div>

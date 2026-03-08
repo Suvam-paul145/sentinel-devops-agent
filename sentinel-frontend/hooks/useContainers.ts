@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { useWebSocketContext } from '@/lib/WebSocketContext';
+import { useWebSocketMessage, useWebSocketConnection } from '@/lib/WebSocketContext';
 
 export interface ContainerMetrics {
     cpu?: string;
@@ -59,7 +59,8 @@ export function useContainers(options: UseContainersOptions = {}) {
     const [hosts, setHosts] = useState<HostSummary[]>([]);
     const [loading, setLoading] = useState(!manual);
     const [error, setError] = useState<string | null>(null);
-    const { lastMessage } = useWebSocketContext();
+    const lastMessage = useWebSocketMessage();
+    const { sendMessage } = useWebSocketConnection();
 
     const fetchContainers = useCallback(async (filterHostId?: string | null) => {
         setLoading(true);
