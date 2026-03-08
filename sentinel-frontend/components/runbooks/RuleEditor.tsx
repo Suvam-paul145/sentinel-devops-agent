@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react';
 import { RunbookTrigger, RunbookAction } from '@/lib/runbook-types';
 
 interface RuleEditorProps {
-    item: RunbookTrigger | RunbookAction;
     itemType: 'trigger' | 'action';
+    item: RunbookTrigger | RunbookAction;
     onSave: (updated: RunbookTrigger | RunbookAction) => void;
     onCancel: () => void;
 }
 
-export function RuleEditor({ item, itemType, onSave, onCancel }: RuleEditorProps) {
+export function RuleEditor({ itemType, item, onSave, onCancel }: RuleEditorProps) {
     const [formData, setFormData] = useState<RunbookTrigger | RunbookAction>({ ...item } as RunbookTrigger | RunbookAction);
 
     useEffect(() => {
@@ -17,11 +17,10 @@ export function RuleEditor({ item, itemType, onSave, onCancel }: RuleEditorProps
 
     const handleChange = (key: string, value: any) => {
         if (itemType === 'action') {
-            const action = formData as RunbookAction;
-            setFormData({
-                ...action,
-                parameters: { ...action.parameters, [key]: value }
-            } as RunbookAction);
+            setFormData((prev) => ({
+                ...prev,
+                parameters: { ...(prev as RunbookAction).parameters, [key]: value }
+            }));
         } else {
             setFormData((prev) => ({ ...prev, [key]: value }));
         }
@@ -66,18 +65,18 @@ export function RuleEditor({ item, itemType, onSave, onCancel }: RuleEditorProps
                     </>
                 ) : (
                     <div className="space-y-3">
-                        {(formData as RunbookAction).parameters && Object.keys((formData as RunbookAction).parameters!).map(key => (
+                        {Object.keys((formData as RunbookAction).parameters || {}).map(key => (
                             <div key={key}>
                                 <label className="block text-xs text-slate-400 mb-1 uppercase tracking-wider">{key}</label>
                                 <input
                                     type="text"
-                                    value={(formData as RunbookAction).parameters![key] || ''}
+                                    value={(formData as RunbookAction).parameters?.[key] || ''}
                                     onChange={(e) => handleChange(key, e.target.value)}
                                     className="w-full bg-slate-800 border border-slate-700 rounded p-2 text-white text-sm focus:border-emerald-500 outline-none"
                                 />
                             </div>
                         ))}
-                        {(!(formData as RunbookAction).parameters || Object.keys((formData as RunbookAction).parameters!).length === 0) && (
+                        {Object.keys((formData as RunbookAction).parameters || {}).length === 0 && (
                             <p className="text-xs text-slate-500 italic">No adjustable parameters for this action.</p>
                         )}
                     </div>

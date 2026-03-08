@@ -59,12 +59,12 @@ export const showStatus = async () => {
             statusText = 'DEGRADED';
         }
 
-            table.push([
-                chalk.bold(name.toUpperCase()),
-                statusColor(statusText),
-                code
-            ]);
-        });
+        table.push([
+            chalk.bold(name.toUpperCase()),
+            statusColor(statusText),
+            code
+        ]);
+    });
 
         console.log(table.toString());
         if (data.lastUpdated) {
@@ -244,13 +244,11 @@ export const generateReport = async () => {
                     severity: isCritical ? 'CRITICAL' : 'DEGRADED',
                     analysis: analysis
                 });
-                lastStatus = 'requires_attention';
+                healthyStart = item.timestamp;
+                lastStatus = isCritical ? 'critical' : 'degraded';
             } else {
                 if (!healthyStart) {
                     healthyStart = item.timestamp;
-                }
-                if (lastStatus === 'requires_attention') {
-                    healthyPeriods.push({ type: 'recovery', timestamp: item.timestamp });
                 }
                 lastStatus = 'healthy';
             }

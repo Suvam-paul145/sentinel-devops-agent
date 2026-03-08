@@ -10,10 +10,12 @@ const { ERRORS } = require('./lib/errors');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-const { listContainers, getContainerHealth } = require('./docker/client');
+const { listContainers, getContainerHealth, docker } = require('./docker/client');
 const containerMonitor = require('./docker/monitor');
 const healer = require('./docker/healer');
 const scalingPredictor = require('./docker/scaling-predictor');
+const aiService = require('./ai');
+const { v4: uuidv4 } = require('uuid');
 const { insertActivityLog, getActivityLogs, insertAIReport, getAIReports } = require('./db/logs');
 const { routeEvent } = require('./config/notifications');
 const { handleDatabaseError } = require('./utils/errorHandler');
@@ -138,11 +140,7 @@ app.use('/api/reasoning', requireAuth, reasoningRoutes);
 
 // --- IN-MEMORY DATABASE ---
 let systemStatus = {
-  services: {
-    auth: { status: 'unknown', code: 0, lastUpdated: null },
-    payment: { status: 'unknown', code: 0, lastUpdated: null },
-    notification: { status: 'unknown', code: 0, lastUpdated: null }
-  },
+  services: {},
   aiAnalysis: "Waiting for AI report...",
   lastUpdated: new Date()
 };
@@ -175,12 +173,55 @@ function logActivity(type, message) {
 // WebSocket Broadcaster
 let wsBroadcaster = { broadcast: () => { } };
 
-// Service configuration
-const services = [
-  { name: 'auth', url: 'http://localhost:3001/health' },
-  { name: 'payment', url: 'http://localhost:3002/health' },
-  { name: 'notification', url: 'http://localhost:3003/health' }
-];
+// Dynamic Services State
+let dynamicServices = [];
+
+async function refreshDynamicServices() {
+  try {
+    const containers = await docker.listContainers({
+      all: true,
+      filters: { label: ['sentinel.monitor=true'] }
+    });
+
+    const newServices = containers.map(container => {
+      const name = container.Names[0].replace('/', '');
+      // Try to get external URL from label, fallback to guessing or internal
+      const urlLabel = container.Labels['sentinel.url'];
+      const url = urlLabel || `http://localhost:${container.Ports[0]?.PublicPort || 80}/health`;
+      
+      return { name, url, id: container.Id };
+    });
+
+    // Detect if services list changed
+    const currentNames = dynamicServices.map(s => s.name).sort();
+    const newNames = newServices.map(s => s.name).sort();
+
+    if (JSON.stringify(currentNames) !== JSON.stringify(newNames)) {
+      console.log(`📡 Dynamic Discovery: Found ${newServices.length} monitored services`);
+      
+      // Update systemStatus with new keys if they don't exist
+      newServices.forEach(s => {
+        if (!systemStatus.services[s.name]) {
+          systemStatus.services[s.name] = { status: 'unknown', code: 0, lastUpdated: null };
+          logActivity('info', `New service discovered: ${s.name}`);
+        }
+      });
+
+      // Remove services that are gone
+      Object.keys(systemStatus.services).forEach(name => {
+        if (!newServices.find(s => s.name === name)) {
+          delete systemStatus.services[name];
+          logActivity('warn', `Service removed: ${name}`);
+        }
+      });
+
+      dynamicServices = newServices;
+      wsBroadcaster.broadcast('SERVICES_DISCOVERED', dynamicServices);
+    }
+  } catch (error) {
+    console.error('❌ Dynamic Discovery Error:', error);
+  }
+}
 
 // Smart Restart Tracking
 const restartTracker = new Map(); // containerId -> { attempts: number, lastAttempt: number }
@@ -189,34 +230,85 @@ const GRACE_PERIOD_MS = 60 * 1000; // 1 minute
 
 // Continuous health checking
 let isChecking = false;
+let isAnalyzing = false;
+let needsAnotherRun = false;
+
+/**
+ * Performs root cause analysis in the background
+ */
+async function analyzeSystemHealth() {
+  if (isAnalyzing) {
+    needsAnotherRun = true;
+    return;
+  }
+
+  isAnalyzing = true;
+  needsAnotherRun = false;
+  systemStatus.aiAnalysis = "Analyzing system health...";
+  wsBroadcaster.broadcast('METRICS', systemStatus);
+
+  try {
+    const report = await aiService.performAnalysis(systemStatus.services);
+    systemStatus.aiAnalysis = report;
+
+    const insight = {
+      id: Date.now(),
+      timestamp: new Date(),
+      analysis: report,
+      summary: report
+    };
+    aiLogs.unshift(insight);
+    if (aiLogs.length > 50) aiLogs.pop();
+
+    // Persist to PostgreSQL (fire-and-forget)
+    insertAIReport(report, report).catch(() => { });
+
+    wsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', insight);
+    wsBroadcaster.broadcast('METRICS', systemStatus);
+    logActivity('info', 'AI Root Cause Analysis completed');
+  } catch (error) {
+    logActivity('error', `AI Analysis failed: ${error.message}`);
+    systemStatus.aiAnalysis = `AI Analysis failed: ${error.message}. Please check logs.`;
+    wsBroadcaster.broadcast('METRICS', systemStatus);
+  } finally {
+    isAnalyzing = false;
+    // If state changed during analysis, run again to capture latest context
+    if (needsAnotherRun) {
+      setTimeout(() => analyzeSystemHealth(), 1000);
+    }
+  }
+}
 
 async function checkServiceHealth() {
   if (isChecking) return;
   isChecking = true;
 
   try {
-    console.log('🔍 Checking service health...');
+    await refreshDynamicServices();
+    
+    if (dynamicServices.length === 0) {
+      console.log('--- No services found to monitor (add sentinel.monitor=true label) ---');
+      return;
+    }
+
+    console.log(`🔍 Checking ${dynamicServices.length} services...`);
     let hasChanges = false;
 
-    for (const service of services) {
+    for (const service of dynamicServices) {
       let newStatus, newCode;
       try {
         const response = await axios.get(service.url, { timeout: 30000 });
-        console.log(`✅ ${service.name}: ${response.status} - ${response.data.status}`);
         newStatus = 'healthy';
         newCode = response.status;
       } catch (error) {
         const code = error.response?.status || 503;
-        console.log(`❌ ${service.name}: ERROR - ${error.code || error.message}`);
         newStatus = code >= 500 ? 'critical' : 'degraded';
         newCode = code;
       }
 
-      if (
-        systemStatus.services[service.name].status !== newStatus ||
-        systemStatus.services[service.name].code !== newCode
-      ) {
-        const prevStatus = systemStatus.services[service.name].status;
+      const current = systemStatus.services[service.name];
+      if (current.status !== newStatus || current.code !== newCode) {
+        const prevStatus = current.status;
 
         // Log Status Changes
         if (newStatus === 'healthy' && prevStatus !== 'healthy' && prevStatus !== 'unknown') {
@@ -256,13 +348,21 @@ async function checkServiceHealth() {
       systemStatus.lastUpdated = new Date();
       // Broadcast full metrics update
       wsBroadcaster.broadcast('METRICS', systemStatus);
+
+      // Trigger AI Analysis in the background if there are failures
+      const hasFailures = Object.values(systemStatus.services).some(s => s.status !== 'healthy');
+      if (hasFailures) {
+        analyzeSystemHealth().catch(err => {
+          logActivity('error', `Background AI Analysis trigger failed: ${err.message}`);
+        });
+      }
     }
   } finally {
     isChecking = false;
   }
 }
 
-setInterval(checkServiceHealth, 5000);
+setInterval(checkServiceHealth, 10000);
 checkServiceHealth();
 
 // --- ENDPOINTS FOR FRONTEND ---
@@ -301,9 +401,8 @@ app.post('/api/kestra-webhook', (req, res) => {
 
   if (aiReport) {
     systemStatus.aiAnalysis = aiReport;
-    // Create an incident/insight object
     const insight = {
-      id: Date.now(),
+      id: uuidv4(),
       timestamp: new Date(),
       analysis: aiReport,
       summary: aiReport
@@ -316,8 +415,8 @@ app.post('/api/kestra-webhook', (req, res) => {
 
     logActivity('info', 'Received new AI Analysis report');
 
-    // Broadcast new incident/insight
-    wsBroadcaster.broadcast('INCIDENT_NEW', insight);
+    // Broadcast new incident/insight using dedicated AI event
+    wsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', insight);
 
     // Call routeEvent with the incident payload for ChatOps
     initiateHealingProtocol({
@@ -332,7 +431,7 @@ app.post('/api/kestra-webhook', (req, res) => {
     incidents.logActivity('info', 'Received new AI Analysis report');
 
     if (globalWsBroadcaster) {
-      globalWsBroadcaster.broadcast('INCIDENT_NEW', newInsight);
+      globalWsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', newInsight);
     }
   }
   systemStatus.lastUpdated = new Date();
@@ -354,7 +453,6 @@ app.post('/api/kestra-webhook', (req, res) => {
         systemStatus.services[serviceName].lastUpdated = new Date();
       }
     });
-
     if (globalWsBroadcaster) {
       globalWsBroadcaster.broadcast('METRICS', systemStatus);
     }
@@ -365,15 +463,14 @@ app.post('/api/kestra-webhook', (req, res) => {
 
 app.post('/api/action/:service/:type', async (req, res) => {
   const { service, type } = req.params;
-  const serviceMap = { 'auth': 3001, 'payment': 3002, 'notification': 3003 };
-  const port = serviceMap[service];
-
-  incidents.logActivity('info', `Triggering action '${type}' on service '${service}'`);
-
-  if (!port) {
+  const target = dynamicServices.find(s => s.name === service);
+  
+  if (!target) {
     incidents.logActivity('warn', `Failed action '${type}': Invalid service '${service}'`);
     return res.status(400).json(ERRORS.SERVICE_NOT_FOUND(service).toJSON());
   }
+
+  logActivity('info', `Triggering action '${type}' on service '${service}'`);
 
   try {
     let mode = 'healthy';
@@ -381,9 +478,12 @@ app.post('/api/action/:service/:type', async (req, res) => {
     if (type === 'degraded') mode = 'degraded';
     if (type === 'slow') mode = 'slow';
 
-    await axios.post(`http://localhost:${port}/simulate/${mode}`, {}, { timeout: 5000 });
+    // Guess target port based on discovered URL or default simulator pattern
+    const urlObj = new URL(target.url);
+    await axios.post(`http://${urlObj.hostname}:${urlObj.port}/simulate/${mode}`, {}, { timeout: 5000 });
+    
     // Force a health check to update status immediately
-    await serviceMonitor.checkServiceHealth();
+    await checkServiceHealth();
 
     incidents.logActivity('success', `Successfully executed '${type}' on ${service}`);
     res.json({ success: true, message: `${type} executed on ${service}` });
@@ -464,10 +564,7 @@ app.post('/api/chatops/slack/actions', verifySlackSignature, (req, res) => {
 
 // --- DOCKER ENDPOINTS ---
 
-// Middleware for ID/Service validation (mock auth for docker endpoints)
 const requireDockerAuth = (req, res, next) => {
-  // In a real app, check 'Authorization' header
-  // For now, assume authenticated if internal or trusted
   next();
 };
 
@@ -557,7 +654,6 @@ app.get('/api/docker/containers', async (req, res) => {
     // Monitor initialization is now global and event-driven via monitor.init()
     // No need to aggressively start monitoring on every list request
 
-    // Enrich with smart restart meta
     const enrichedContainers = containers.map(c => {
       const tracker = restartTracker.get(c.id) || { attempts: 0, lastAttempt: 0 };
       return {
@@ -599,7 +695,6 @@ app.post('/api/docker/try-restart/:id', requireDockerAuth, validateId, async (re
   const now = Date.now();
   let tracker = restartTracker.get(id) || { attempts: 0, lastAttempt: 0 };
 
-  // Reset attempts if outside grace period
   if (now - tracker.lastAttempt > GRACE_PERIOD_MS) {
     tracker.attempts = 0;
   }
@@ -621,10 +716,7 @@ app.post('/api/docker/try-restart/:id', requireDockerAuth, validateId, async (re
 });
 
 app.post('/api/docker/restart/:id', requireDockerAuth, validateId, async (req, res) => {
-  // Manual override bypasses smart checks, or update tracker manually
   const id = req.params.id;
-  // Update tracker so manual restarts count towards limits or reset headers? 
-  // For manual, we usually want to force it. We won't incr limits but update 'lastAttempt' timestamp
   const now = Date.now();
   let tracker = restartTracker.get(id) || { attempts: 0, lastAttempt: 0 };
   tracker.lastAttempt = now;
