@@ -12,41 +12,74 @@ async function restartContainer(containerId) {
 }
 
 async function recreateContainer(containerId) {
+    let backupContainer = null;
+    let newContainer = null;
+    let originalName = '';
+
     try {
         const container = docker.getContainer(containerId);
         const info = await container.inspect();
+        originalName = info.Name.replace('/', '');
 
-        // Prepare new configuration
-        // Use proper mapping for NetworkingConfig from validated inspection
+        const timestamp = Date.now();
+        const backupName = `${originalName}_backup_${timestamp}`;
+        const tempName = `${originalName}_new_${timestamp}`;
+
+        console.log(`[HEALER] Starting safe recreation for ${originalName}`);
+
+        // 1. Create new container with temporary name
         const networkingConfig = {
             EndpointsConfig: info.NetworkSettings.Networks
         };
 
-        // Create new container first
-        const newName = `${info.Name.replace('/', '')}-new`;
-        const newContainer = await docker.createContainer({
-            Image: info.Config.Image,
-            name: newName,
+        newContainer = await docker.createContainer({
             ...info.Config,
+            name: tempName,
             HostConfig: info.HostConfig,
             NetworkingConfig: networkingConfig
         });
 
+        // 2. Start new container
         await newContainer.start();
+        console.log(`[HEALER] New container ${tempName} started.`);
 
-        // Now safely remove the old one if it was running
-        if (info.State.Running) {
-            await container.stop();
+        // 3. Rename old container to backup name
+        // This frees up the original name
+        await container.rename({ name: backupName });
+        backupContainer = container;
+        console.log(`[HEALER] Old container renamed to ${backupName}.`);
+
+        try {
+            // 4. Rename new container to original name
+            await newContainer.rename({ name: originalName });
+            console.log(`[HEALER] New container renamed to ${originalName}.`);
+        } catch (renameError) {
+            console.error(`[HEALER] Critical: Failed to rename new container to ${originalName}.`, renameError);
+            console.error(`[HEALER] Original container is preserved as ${backupName}. Manual intervention required.`);
+            throw new Error(`Rename failed: ${renameError.message}. Backup preserved as ${backupName}`);
         }
-        await container.remove();
 
-        // Rename new container to old name
-        await newContainer.rename({ name: info.Name.replace('/', '') });
+        // 5. Safely remove the backup (old) container
+        if (info.State.Running) {
+            try {
+                await backupContainer.stop({ t: 10 });
+            } catch (stopError) {
+                console.warn(`[HEALER] Failed to stop backup container: ${stopError.message}`);
+            }
+        }
+        await backupContainer.remove();
+        console.log(`[HEALER] Backup container ${backupName} removed.`);
 
-        return { action: 'recreate', success: true, newId: newContainer.id };
+        return { action: 'recreate', success: true, newId: newContainer.id, name: originalName };
     } catch (error) {
         console.error(`Failed to recreate container ${containerId}:`, error);
-        return { action: 'recreate', success: false, containerId, error: error.message };
+        return { 
+            action: 'recreate', 
+            success: false, 
+            containerId, 
+            error: error.message,
+            tip: error.message.includes('Backup preserved') ? 'Check Docker for backup container' : undefined
+        };
     }
 }
 
