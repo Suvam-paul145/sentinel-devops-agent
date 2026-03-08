@@ -1,21 +1,47 @@
 // Load environment variables
 require('dotenv').config();
 
-// Validate configuration before starting
+// Validate secure secrets in production
+const { validateEnvSecrets } = require('./utils/envValidator');
+try {
+  validateEnvSecrets();
+} catch (error) {
+  console.error('\n' + '='.repeat(80));
+  console.error('🚨 CRITICAL SECURITY ERROR 🚨');
+  console.error('='.repeat(80));
+  console.error(error.message);
+  console.error('='.repeat(80));
+  console.error('\nApplication cannot start with insecure configuration.\n');
+  console.error('Please fix the issues above and restart the application.\n');
+  process.exit(1);
+}
+
+// Validate configuration and provide development warnings
 const { validateConfig } = require('./config/validator');
 validateConfig({ exitOnError: process.env.NODE_ENV === 'production' });
-const { setupWebSocket } = require('./websocket');
+
+// Provide development warnings for placeholder values (non-blocking)
+if (process.env.NODE_ENV !== 'production') {
+  validateForDevelopment();
+}
+const { setupWebSocket, closeWebSocketServer } = require('./websocket');
+const { closePool } = require('./db/config');
 const express = require('express');
 const { ERRORS } = require('./lib/errors');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-const { listContainers, getContainerHealth, hostManager } = require('./docker/client');
+const { listContainers, getContainerHealth, docker } = require('./docker/client');
 const containerMonitor = require('./docker/monitor');
 const healer = require('./docker/healer');
+const { v4: uuidv4 } = require('uuid');
 const scalingPredictor = require('./docker/scaling-predictor');
+const aiService = require('./ai');
+const { v4: uuidv4 } = require('uuid');
 const { insertActivityLog, getActivityLogs, insertAIReport, getAIReports } = require('./db/logs');
 const { routeEvent } = require('./config/notifications');
+const { handleDatabaseError } = require('./utils/errorHandler');
+const { validateForDevelopment } = require('./utils/envValidator');
 
 // Hosts Routes for multi-host Docker support
 const hostsRoutes = require('./routes/hosts.routes');
@@ -143,11 +169,7 @@ app.use('/api/reasoning', requireAuth, reasoningRoutes);
 
 // --- IN-MEMORY DATABASE ---
 let systemStatus = {
-  services: {
-    auth: { status: 'unknown', code: 0, lastUpdated: null },
-    payment: { status: 'unknown', code: 0, lastUpdated: null },
-    notification: { status: 'unknown', code: 0, lastUpdated: null }
-  },
+  services: {},
   aiAnalysis: "Waiting for AI report...",
   lastUpdated: new Date()
 };
@@ -171,7 +193,7 @@ function logActivity(type, message) {
   console.log(`[LOG] ${type}: ${message}`);
 
   // Persist to PostgreSQL (fire-and-forget)
-  insertActivityLog(type, message).catch(() => { });
+  insertActivityLog(type, message).catch(err => handleDatabaseError(err, 'insertActivityLog', { type, message }));
 
   // Broadcast the new log entry to all connected WebSocket clients
   wsBroadcaster.broadcast('ACTIVITY_LOG', entry);
@@ -180,12 +202,55 @@ function logActivity(type, message) {
 // WebSocket Broadcaster
 let wsBroadcaster = { broadcast: () => { } };
 
-// Service configuration
-const services = [
-  { name: 'auth', url: 'http://localhost:3001/health' },
-  { name: 'payment', url: 'http://localhost:3002/health' },
-  { name: 'notification', url: 'http://localhost:3003/health' }
-];
+// Dynamic Services State
+let dynamicServices = [];
+
+async function refreshDynamicServices() {
+  try {
+    const containers = await docker.listContainers({
+      all: true,
+      filters: { label: ['sentinel.monitor=true'] }
+    });
+
+    const newServices = containers.map(container => {
+      const name = container.Names[0].replace('/', '');
+      // Try to get external URL from label, fallback to guessing or internal
+      const urlLabel = container.Labels['sentinel.url'];
+      const url = urlLabel || `http://localhost:${container.Ports[0]?.PublicPort || 80}/health`;
+      
+      return { name, url, id: container.Id };
+    });
+
+    // Detect if services list changed
+    const currentNames = dynamicServices.map(s => s.name).sort();
+    const newNames = newServices.map(s => s.name).sort();
+
+    if (JSON.stringify(currentNames) !== JSON.stringify(newNames)) {
+      console.log(`📡 Dynamic Discovery: Found ${newServices.length} monitored services`);
+      
+      // Update systemStatus with new keys if they don't exist
+      newServices.forEach(s => {
+        if (!systemStatus.services[s.name]) {
+          systemStatus.services[s.name] = { status: 'unknown', code: 0, lastUpdated: null };
+          logActivity('info', `New service discovered: ${s.name}`);
+        }
+      });
+
+      // Remove services that are gone
+      Object.keys(systemStatus.services).forEach(name => {
+        if (!newServices.find(s => s.name === name)) {
+          delete systemStatus.services[name];
+          logActivity('warn', `Service removed: ${name}`);
+        }
+      });
+
+      dynamicServices = newServices;
+      wsBroadcaster.broadcast('SERVICES_DISCOVERED', dynamicServices);
+    }
+  } catch (error) {
+    console.error('❌ Dynamic Discovery Error:', error);
+  }
+}
 
 // Smart Restart Tracking
 const restartTracker = new Map(); // containerId -> { attempts: number, lastAttempt: number }
@@ -194,34 +259,85 @@ const GRACE_PERIOD_MS = 60 * 1000; // 1 minute
 
 // Continuous health checking
 let isChecking = false;
+let isAnalyzing = false;
+let needsAnotherRun = false;
+
+/**
+ * Performs root cause analysis in the background
+ */
+async function analyzeSystemHealth() {
+  if (isAnalyzing) {
+    needsAnotherRun = true;
+    return;
+  }
+
+  isAnalyzing = true;
+  needsAnotherRun = false;
+  systemStatus.aiAnalysis = "Analyzing system health...";
+  wsBroadcaster.broadcast('METRICS', systemStatus);
+
+  try {
+    const report = await aiService.performAnalysis(systemStatus.services);
+    systemStatus.aiAnalysis = report;
+
+    const insight = {
+      id: Date.now(),
+      timestamp: new Date(),
+      analysis: report,
+      summary: report
+    };
+    aiLogs.unshift(insight);
+    if (aiLogs.length > 50) aiLogs.pop();
+
+    // Persist to PostgreSQL (fire-and-forget)
+    insertAIReport(report, report).catch(() => { });
+
+    wsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', insight);
+    wsBroadcaster.broadcast('METRICS', systemStatus);
+    logActivity('info', 'AI Root Cause Analysis completed');
+  } catch (error) {
+    logActivity('error', `AI Analysis failed: ${error.message}`);
+    systemStatus.aiAnalysis = `AI Analysis failed: ${error.message}. Please check logs.`;
+    wsBroadcaster.broadcast('METRICS', systemStatus);
+  } finally {
+    isAnalyzing = false;
+    // If state changed during analysis, run again to capture latest context
+    if (needsAnotherRun) {
+      setTimeout(() => analyzeSystemHealth(), 1000);
+    }
+  }
+}
 
 async function checkServiceHealth() {
   if (isChecking) return;
   isChecking = true;
 
   try {
-    console.log('🔍 Checking service health...');
+    await refreshDynamicServices();
+    
+    if (dynamicServices.length === 0) {
+      console.log('--- No services found to monitor (add sentinel.monitor=true label) ---');
+      return;
+    }
+
+    console.log(`🔍 Checking ${dynamicServices.length} services...`);
     let hasChanges = false;
 
-    for (const service of services) {
+    for (const service of dynamicServices) {
       let newStatus, newCode;
       try {
         const response = await axios.get(service.url, { timeout: 30000 });
-        console.log(`✅ ${service.name}: ${response.status} - ${response.data.status}`);
         newStatus = 'healthy';
         newCode = response.status;
       } catch (error) {
         const code = error.response?.status || 503;
-        console.log(`❌ ${service.name}: ERROR - ${error.code || error.message}`);
         newStatus = code >= 500 ? 'critical' : 'degraded';
         newCode = code;
       }
 
-      if (
-        systemStatus.services[service.name].status !== newStatus ||
-        systemStatus.services[service.name].code !== newCode
-      ) {
-        const prevStatus = systemStatus.services[service.name].status;
+      const current = systemStatus.services[service.name];
+      if (current.status !== newStatus || current.code !== newCode) {
+        const prevStatus = current.status;
 
         // Log Status Changes
         if (newStatus === 'healthy' && prevStatus !== 'healthy' && prevStatus !== 'unknown') {
@@ -261,13 +377,21 @@ async function checkServiceHealth() {
       systemStatus.lastUpdated = new Date();
       // Broadcast full metrics update
       wsBroadcaster.broadcast('METRICS', systemStatus);
+
+      // Trigger AI Analysis in the background if there are failures
+      const hasFailures = Object.values(systemStatus.services).some(s => s.status !== 'healthy');
+      if (hasFailures) {
+        analyzeSystemHealth().catch(err => {
+          logActivity('error', `Background AI Analysis trigger failed: ${err.message}`);
+        });
+      }
     }
   } finally {
     isChecking = false;
   }
 }
 
-setInterval(checkServiceHealth, 5000);
+setInterval(checkServiceHealth, 10000);
 checkServiceHealth();
 
 // --- ENDPOINTS FOR FRONTEND ---
@@ -306,9 +430,8 @@ app.post('/api/kestra-webhook', (req, res) => {
 
   if (aiReport) {
     systemStatus.aiAnalysis = aiReport;
-    // Create an incident/insight object
     const insight = {
-      id: Date.now(),
+      id: uuidv4(),
       timestamp: new Date(),
       analysis: aiReport,
       summary: aiReport
@@ -317,12 +440,12 @@ app.post('/api/kestra-webhook', (req, res) => {
     if (aiLogs.length > 50) aiLogs.pop();
 
     // Persist to PostgreSQL (fire-and-forget)
-    insertAIReport(aiReport, aiReport).catch(() => { });
+    insertAIReport(aiReport, aiReport).catch(err => handleDatabaseError(err, 'insertAIReport', { aiReport }));
 
     logActivity('info', 'Received new AI Analysis report');
 
-    // Broadcast new incident/insight
-    wsBroadcaster.broadcast('INCIDENT_NEW', insight);
+    // Broadcast new incident/insight using dedicated AI event
+    wsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', insight);
 
     // Call routeEvent with the incident payload for ChatOps
     initiateHealingProtocol({
@@ -337,7 +460,7 @@ app.post('/api/kestra-webhook', (req, res) => {
     incidents.logActivity('info', 'Received new AI Analysis report');
 
     if (globalWsBroadcaster) {
-      globalWsBroadcaster.broadcast('INCIDENT_NEW', newInsight);
+      globalWsBroadcaster.broadcast('AI_ANALYSIS_COMPLETE', newInsight);
     }
   }
   systemStatus.lastUpdated = new Date();
@@ -359,7 +482,6 @@ app.post('/api/kestra-webhook', (req, res) => {
         systemStatus.services[serviceName].lastUpdated = new Date();
       }
     });
-
     if (globalWsBroadcaster) {
       globalWsBroadcaster.broadcast('METRICS', systemStatus);
     }
@@ -368,17 +490,119 @@ app.post('/api/kestra-webhook', (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/metrics', async (req, res) => {
+  try {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+  } catch (ex) {
+    res.status(500).end(ex);
+  }
+});
+
+// --- PROMETHEUS ALERTMANAGER WEBHOOK ---
+app.post('/api/webhooks/alertmanager', async (req, res) => {
+  const { alerts, status: groupStatus } = req.body;
+  const token = req.headers['x-sentinel-token'];
+  const SECRET = process.env.ALERTMANAGER_SECRET;
+
+  if (!SECRET) {
+    console.error('[ALERTMANAGER] ERROR: ALERTMANAGER_SECRET is not set in .env. Rejecting all webhooks.');
+    return res.status(500).json({ error: 'Webhook secret not configured' });
+  }
+
+  if (token !== SECRET) {
+    console.error('[ALERTMANAGER] Unauthorized webhook attempt (Invalid X-Sentinel-Token)');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  if (!alerts || !Array.isArray(alerts)) {
+    return res.status(400).json({ error: 'Invalid Alertmanager payload' });
+  }
+
+  console.log(`[ALERTMANAGER] Received ${alerts.length} alerts with status: ${groupStatus}`);
+
+  // Process alerts in the background to avoid blocking the webhook ACK
+  (async () => {
+    for (const alert of alerts) {
+      try {
+        const status = alert.status || groupStatus || 'unknown';
+        const labels = alert.labels || {};
+        const annotations = alert.annotations || {};
+        
+        const alertName = labels.alertname || 'Unknown Alert';
+        const severity = labels.severity || 'info';
+        const instance = labels.instance || 'unknown';
+        const summary = annotations.summary || annotations.description || 'No summary provided';
+
+        const logSeverity = status === 'firing' ? (severity === 'critical' ? 'alert' : 'warn') : 'success';
+        logActivity(logSeverity, `Prometheus Alert [${status.toUpperCase()}]: ${alertName} on ${instance} - ${summary}`);
+
+        // Update Prometheus counters
+        recordIncident({ 
+          severity, 
+          service: instance, 
+          type: 'PROMETHEUS_ALERT' 
+        });
+
+        if (status === 'firing') {
+          // Trigger "AI Investigation"
+          const investigationId = uuidv4();
+          const analysisText = `🔍 Sentinel AI is investigating ${alertName} on ${instance}...\n\n` +
+            `Detected: ${summary}\n` +
+            `Severity: ${severity.toUpperCase()}\n\n` +
+            `Rule: Check logs for ${instance} and verify service health.`;
+          
+          const insight = {
+            id: investigationId,
+            timestamp: new Date(),
+            type: 'PROMETHEUS_INVESTIGATION',
+            alertName,
+            severity,
+            instance,
+            summary,
+            status: 'investigating',
+            analysis: analysisText
+          };
+
+          // Update local state and broadcast
+          aiLogs.unshift(insight);
+          if (aiLogs.length > 50) aiLogs.pop();
+          wsBroadcaster.broadcast('INCIDENT_NEW', insight);
+
+          // Persist to DB using the common path
+          insertAIReport(analysisText, `Investigation: ${alertName} on ${instance}`).catch(() => { });
+
+          // Dispatch Kestra investigation (fire and forget)
+          const kestraEndpoint = process.env.KESTRA_ENDPOINT || 'http://localhost:8080';
+          console.log(`[AI] Dispatching investigation for ${alertName} to Kestra at ${kestraEndpoint}`);
+          axios.post(`${kestraEndpoint}/api/v1/executions/sentinel/intelligent-monitor`, {
+            alert: alertName,
+            instance: instance,
+            severity: severity,
+            summary: summary
+          }, { timeout: 2000 }).catch(err => {
+            console.warn(`[AI] Kestra dispatch failed (is Kestra running?): ${err.message}`);
+          });
+        }
+      } catch (err) {
+        console.error(`[ALERTMANAGER] Error processing individual alert: ${err.message}`);
+      }
+    }
+  })();
+
+  res.json({ success: true, message: `Queued ${alerts.length} alerts for processing` });
+});
+
 app.post('/api/action/:service/:type', async (req, res) => {
   const { service, type } = req.params;
-  const serviceMap = { 'auth': 3001, 'payment': 3002, 'notification': 3003 };
-  const port = serviceMap[service];
-
-  incidents.logActivity('info', `Triggering action '${type}' on service '${service}'`);
-
-  if (!port) {
+  const target = dynamicServices.find(s => s.name === service);
+  
+  if (!target) {
     incidents.logActivity('warn', `Failed action '${type}': Invalid service '${service}'`);
     return res.status(400).json(ERRORS.SERVICE_NOT_FOUND(service).toJSON());
   }
+
+  logActivity('info', `Triggering action '${type}' on service '${service}'`);
 
   try {
     let mode = 'healthy';
@@ -386,9 +610,12 @@ app.post('/api/action/:service/:type', async (req, res) => {
     if (type === 'degraded') mode = 'degraded';
     if (type === 'slow') mode = 'slow';
 
-    await axios.post(`http://localhost:${port}/simulate/${mode}`, {}, { timeout: 5000 });
+    // Guess target port based on discovered URL or default simulator pattern
+    const urlObj = new URL(target.url);
+    await axios.post(`http://${urlObj.hostname}:${urlObj.port}/simulate/${mode}`, {}, { timeout: 5000 });
+    
     // Force a health check to update status immediately
-    await serviceMonitor.checkServiceHealth();
+    await checkServiceHealth();
 
     incidents.logActivity('success', `Successfully executed '${type}' on ${service}`);
     res.json({ success: true, message: `${type} executed on ${service}` });
@@ -469,10 +696,7 @@ app.post('/api/chatops/slack/actions', verifySlackSignature, (req, res) => {
 
 // --- DOCKER ENDPOINTS ---
 
-// Middleware for ID/Service validation (mock auth for docker endpoints)
 const requireDockerAuth = (req, res, next) => {
-  // In a real app, check 'Authorization' header
-  // For now, assume authenticated if internal or trusted
   next();
 };
 
@@ -564,7 +788,6 @@ app.get('/api/docker/containers', requireAuth, async (req, res) => {
     // Use Promise.allSettled to handle monitoring setup concurrently without crashing
     await Promise.allSettled(containers.map(c => containerMonitor.startMonitoring(c.id)));
 
-    // Enrich with smart restart meta
     const enrichedContainers = containers.map(c => {
       const tracker = restartTracker.get(c.id) || { attempts: 0, lastAttempt: 0 };
       return {
@@ -623,7 +846,6 @@ app.post('/api/docker/try-restart/:id', requireAuth, validateId, async (req, res
   const now = Date.now();
   let tracker = restartTracker.get(id) || { attempts: 0, lastAttempt: 0 };
 
-  // Reset attempts if outside grace period
   if (now - tracker.lastAttempt > GRACE_PERIOD_MS) {
     tracker.attempts = 0;
   }
@@ -644,11 +866,8 @@ app.post('/api/docker/try-restart/:id', requireAuth, validateId, async (req, res
   }
 });
 
-app.post('/api/docker/restart/:id', requireAuth, validateId, async (req, res) => {
-  // Manual override bypasses smart checks, or update tracker manually
+app.post('/api/docker/restart/:id', requireDockerAuth, validateId, async (req, res) => {
   const id = req.params.id;
-  // Update tracker so manual restarts count towards limits or reset headers? 
-  // For manual, we usually want to force it. We won't incr limits but update 'lastAttempt' timestamp
   const now = Date.now();
   let tracker = restartTracker.get(id) || { attempts: 0, lastAttempt: 0 };
   tracker.lastAttempt = now;
@@ -814,3 +1033,55 @@ k8sWatcher.on('crashloop', (pod) => {
     });
   }
 });
+
+/**
+ * Graceful shutdown handler
+ * @param {string} signal - The termination signal received
+ */
+async function gracefulShutdown(signal) {
+  console.log(`\n🔄 Received ${signal}. Starting graceful shutdown...`);
+  
+  // Start a fail-safe timeout to prevent hanging
+  const failSafeTimeout = setTimeout(() => {
+    console.error('❌ Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, 10000);
+  
+  try {
+    // Stop accepting new HTTP requests
+    console.log('🔄 Closing HTTP server...');
+    await new Promise((resolve, reject) => {
+      server.close((err) => {
+        if (err) {
+          console.error('❌ Error closing HTTP server:', err);
+          reject(err);
+        } else {
+          console.log('✅ HTTP server closed successfully');
+          resolve();
+        }
+      });
+    });
+    
+    // Close WebSocket connections
+    console.log('🔄 Closing WebSocket server...');
+    await closeWebSocketServer();
+    
+    // Close database pool
+    console.log('🔄 Closing database pool...');
+    await closePool();
+    
+    // Clear the fail-safe timeout
+    clearTimeout(failSafeTimeout);
+    
+    console.log('✅ Graceful shutdown complete');
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Error during graceful shutdown:', error);
+    clearTimeout(failSafeTimeout);
+    process.exit(1);
+  }
+}
+
+// Attach signal listeners for graceful shutdown
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
