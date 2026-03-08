@@ -12,16 +12,17 @@ class ContainerMonitor extends EventEmitter {
         super();
         this.metrics = new Map();
         this.watchers = new Map();
+        this.buffers = new Map();
+        
+        // Upstream feature maps
         this.healthTimers = new Map();
         this.containerLabels = new Map();
-        this.containerInfoCache = new Map(); // Full inspect data for dependency graph
+        this.containerInfoCache = new Map();
         this.lastHealthState = new Map();
-        this.pollingInterval = 30000; // 30 seconds default
+        this.pollingInterval = 30000;
         this.isRunning = false;
         this.isPolling = false;
         this.timer = null;
-
-        // Upstream feature tracking
         this.lastStorePush = new Map();
         this.securityTimers = new Map();
         this.restartCounts = new Map();
@@ -36,17 +37,16 @@ class ContainerMonitor extends EventEmitter {
 
         console.log('🚀 Initializing Docker Event-Driven Monitor with Analytics...');
 
-        // 1. Listen for Docker events (lifecycle management)
         try {
             const eventStream = await docker.getEvents({
                 filters: { type: ['container'], event: ['start', 'stop', 'die', 'destroy'] }
             });
 
-            let buffer = '';
+            let eventBuffer = '';
             eventStream.on('data', (chunk) => {
-                buffer += chunk.toString('utf8');
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+                eventBuffer += chunk.toString('utf8');
+                const lines = eventBuffer.split('\n');
+                eventBuffer = lines.pop() || '';
 
                 for (const line of lines) {
                     if (!line.trim()) continue;
@@ -59,9 +59,11 @@ class ContainerMonitor extends EventEmitter {
 
                         if (action === 'start') {
                             console.log(`📡 Container started: ${containerId.substring(0, 12)} - Initializing monitoring...`);
-                            this.pollSingle(containerId); // Immediate first look
+                            this.pollSingle(containerId);
+                            this.startMonitoring(containerId); // Also start streaming if possible
                         } else if (['stop', 'die', 'destroy'].includes(action)) {
                             console.log(`📡 Container stopped: ${containerId.substring(0, 12)} - Clearing data`);
+                            this.stopMonitoring(containerId);
                             this.cleanup(containerId);
                         }
                     } catch (e) {
@@ -81,8 +83,74 @@ class ContainerMonitor extends EventEmitter {
             setTimeout(() => this.init(), 5000);
         }
 
-        // 2. Start throttled metrics polling
         this.startPolling();
+    }
+
+    async startMonitoring(containerId) {
+        if (this.watchers.has(containerId)) return;
+
+        try {
+            const container = docker.getContainer(containerId);
+            // Pre-register buffer to avoid race condition
+            this.buffers.set(containerId, '');
+            
+            const stream = await container.stats({ stream: true });
+            this.watchers.set(containerId, stream);
+
+            stream.on('data', (chunk) => {
+                try {
+                    const currentBuffer = this.buffers.get(containerId);
+                    if (currentBuffer === undefined) return; // Stream data arrived after stopMonitoring
+
+                    let buffer = currentBuffer + chunk.toString();
+                    const lines = buffer.split('\n');
+                    this.buffers.set(containerId, lines.pop());
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        try {
+                            const stats = JSON.parse(line);
+                            this.metrics.set(containerId, this.parseStats(stats));
+                        } catch (parseError) {
+                            // ignore malformed line
+                        }
+                    }
+                } catch (e) {
+                    console.error(`Parsing error for ${containerId}:`, e.message);
+                }
+            });
+
+            stream.on('error', (err) => {
+                console.error(`Stream error for ${containerId}:`, err);
+                this.stopMonitoring(containerId);
+            });
+
+            stream.on('end', () => {
+                this.stopMonitoring(containerId);
+            });
+        } catch (error) {
+            console.error(`Failed to start monitoring ${containerId}:`, error);
+        }
+    }
+
+    stopMonitoring(containerId) {
+        if (this.watchers.has(containerId)) {
+            const stream = this.watchers.get(containerId);
+            if (stream.destroy) stream.destroy();
+            this.watchers.delete(containerId);
+
+            // Flush final buffer if it contains a complete JSON object
+            const finalBuffer = this.buffers.get(containerId);
+            if (finalBuffer && finalBuffer.trim()) {
+                try {
+                    const stats = JSON.parse(finalBuffer);
+                    this.metrics.set(containerId, this.parseStats(stats));
+                } catch (e) {
+                    // Not a complete JSON object, ignore
+                }
+            }
+            this.buffers.delete(containerId);
+        }
     }
 
     startPolling() {
@@ -92,22 +160,19 @@ class ContainerMonitor extends EventEmitter {
     }
 
     async pollAll() {
-        if (this.isPolling) return; // Prevent overlap
+        if (this.isPolling) return;
         this.isPolling = true;
 
         try {
             const containers = await docker.listContainers({ all: false });
             const activeIds = new Set(containers.map(c => c.Id));
 
-            // Clean stale containers (missed stop events)
             for (const knownId of this.metrics.keys()) {
                 if (!activeIds.has(knownId)) {
-                    console.log(`🧹 Cleaning up stale container: ${knownId.substring(0, 12)}`);
                     this.cleanup(knownId);
                 }
             }
 
-            // Parallel polling
             await Promise.allSettled(containers.map(c => this.pollSingle(c.Id)));
         } catch (error) {
             console.error('❌ Global poll failed:', error);
@@ -121,7 +186,6 @@ class ContainerMonitor extends EventEmitter {
             const container = docker.getContainer(containerId);
             const now = Date.now();
 
-            // 1. Periodic Inspection (Throttled to 30s as per upstream logic)
             const lastInspect = this.lastInspectTimes.get(containerId) || 0;
             if (now - lastInspect > 30000 || !this.containerNames.has(containerId)) {
                 try {
@@ -129,30 +193,24 @@ class ContainerMonitor extends EventEmitter {
                     this.lastInspectTimes.set(containerId, now);
                     this.restartCounts.set(containerId, data.RestartCount || 0);
                     this.containerNames.set(containerId, data.Name.replace(/^\//, ''));
-
-                    // Smart Branch: Labels and Cache
                     this.containerLabels.set(containerId, data.Config.Labels || {});
                     this.containerInfoCache.set(containerId, data);
-
-                    // Rebuild dependency graph
+                    
                     dependencyGraph.populateFromContainers([...this.containerInfoCache.values()]);
 
-                    // Check if security scan needed
                     if (!this.securityTimers.has(containerId)) {
                         this.scheduleSecurityScan(containerId, data.Image);
                     }
-                } catch (e) { /* silent fail for transient inspect errors */ }
+                } catch (e) { }
             }
 
-            // 2. Fetch Stats
             const stats = await container.stats({ stream: false });
             const parsed = this.parseStats(stats);
             this.metrics.set(containerId, parsed);
 
-            // 3. Push to Metrics Store & Predict (matches upstream frequency Logic: 5s)
             metricsStore.push(containerId, {
-                cpuPercent: parsed.raw.cpuPercent,
-                memPercent: parsed.raw.memPercent,
+                cpuPercent: parseFloat(parsed.cpu),
+                memPercent: parseFloat(parsed.memory.percent),
                 restartCount: this.restartCounts.get(containerId) || 0
             });
 
@@ -161,35 +219,32 @@ class ContainerMonitor extends EventEmitter {
                 this.emit('prediction', { ...prediction, containerName: this.containerNames.get(containerId) });
             }
 
-            // 4. Smart Branch: Health Check
             await this.checkContainerHealth(containerId);
-
         } catch (error) {
-            // Container likely disappeared
             this.cleanup(containerId);
         }
     }
 
     cleanup(containerId) {
+        this.stopMonitoring(containerId);
         this.metrics.delete(containerId);
         this.lastStorePush.delete(containerId);
         this.restartCounts.delete(containerId);
         this.containerNames.delete(containerId);
         this.lastInspectTimes.delete(containerId);
         this.lastPredictTimes.delete(containerId);
+        this.containerLabels.delete(containerId);
+        this.lastHealthState.delete(containerId);
+        this.containerInfoCache.delete(containerId);
+        
         metricsStore.clear(containerId);
+        flapDetector.clear(containerId);
+        dependencyGraph.clearContainer(containerId);
 
-        // Smart Branch Cleanup
         if (this.healthTimers.has(containerId)) {
             clearInterval(this.healthTimers.get(containerId));
             this.healthTimers.delete(containerId);
         }
-        this.containerLabels.delete(containerId);
-        this.lastHealthState.delete(containerId);
-        this.containerInfoCache.delete(containerId);
-        flapDetector.clear(containerId);
-        dependencyGraph.clearContainer(containerId);
-
         if (this.securityTimers.has(containerId)) {
             clearInterval(this.securityTimers.get(containerId));
             this.securityTimers.delete(containerId);
@@ -197,10 +252,10 @@ class ContainerMonitor extends EventEmitter {
     }
 
     scheduleSecurityScan(containerId, imageId) {
-        scanImage(imageId).catch(err => console.error(`[Security] Automated scan failed for ${containerId}:`, err.message));
+        scanImage(imageId).catch(() => {});
         const interval = 24 * 60 * 60 * 1000;
         const timer = setInterval(() => {
-            scanImage(imageId).catch(err => console.error(`[Security] Periodic scan failed for ${containerId}:`, err.message));
+            scanImage(imageId).catch(() => {});
         }, interval);
         this.securityTimers.set(containerId, timer);
     }
@@ -240,12 +295,7 @@ class ContainerMonitor extends EventEmitter {
                 rx: this.formatBytes(stats.networks?.eth0?.rx_bytes || 0),
                 tx: this.formatBytes(stats.networks?.eth0?.tx_bytes || 0)
             },
-            timestamp: new Date(),
-            raw: {
-                cpuPercent,
-                memPercent,
-                memLimit
-            }
+            timestamp: new Date()
         };
     }
 
@@ -266,8 +316,6 @@ class ContainerMonitor extends EventEmitter {
         try {
             const container = docker.getContainer(containerId);
             const info = await container.inspect();
-
-            // Determine if truly unhealthy (from docker healthcheck or state)
             const isRunning = info.State.Running;
             const healthStatus = info.State.Health ? info.State.Health.Status : (isRunning ? 'healthy' : 'unhealthy');
             const isHealthy = healthStatus === 'healthy' || healthStatus === 'starting';
@@ -275,12 +323,9 @@ class ContainerMonitor extends EventEmitter {
             const lastState = this.lastHealthState.get(containerId);
             if (lastState !== isHealthy) {
                 this.lastHealthState.set(containerId, isHealthy);
-
-                // State changed! Run through flap detector
                 const flapResult = flapDetector.record(containerId, isHealthy);
 
                 if (!isHealthy && !flapResult.suppressAlert) {
-                    // Generate an alert and pass to correlator
                     const labels = this.containerLabels.get(containerId) || {};
                     const alert = { containerId, labels, type: 'container_failure', isHealthy };
                     alertCorrelator.add(alert);
@@ -288,19 +333,12 @@ class ContainerMonitor extends EventEmitter {
             }
         } catch (error) {
             if (error.statusCode === 404) {
-                // Container is confirmed gone — stop polling
-                console.warn(`Container ${containerId} no longer exists, stopping monitoring.`);
                 this.cleanup(containerId);
-            } else {
-                // console.error(`Health check failed for ${containerId}:`, error.message);
             }
         }
     }
 
     getCorrelatedGroups() {
-        // Re-derive from correlator on each call. Now that groupId is
-        // deterministic, this is safe and keeps data current (respects
-        // the 60-second correlation window, auto-expiring recovered groups).
         return alertCorrelator.correlate();
     }
 }
