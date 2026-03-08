@@ -6,6 +6,7 @@ const { scanImage } = require('../security/scanner');
 const EventEmitter = require('events');
 const metricsStore = require('../db/metrics-store');
 const { predictContainer } = require('./predictor');
+const { handleAsyncError } = require('../utils/errorHandler');
 
 class ContainerMonitor extends EventEmitter {
     constructor() {

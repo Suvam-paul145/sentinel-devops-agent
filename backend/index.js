@@ -18,6 +18,7 @@ const aiService = require('./ai');
 const { v4: uuidv4 } = require('uuid');
 const { insertActivityLog, getActivityLogs, insertAIReport, getAIReports } = require('./db/logs');
 const { routeEvent } = require('./config/notifications');
+const { handleDatabaseError } = require('./utils/errorHandler');
 
 const pendingApprovals = new Map();
 
@@ -163,7 +164,7 @@ function logActivity(type, message) {
   console.log(`[LOG] ${type}: ${message}`);
 
   // Persist to PostgreSQL (fire-and-forget)
-  insertActivityLog(type, message).catch(() => { });
+  insertActivityLog(type, message).catch(err => handleDatabaseError(err, 'insertActivityLog', { type, message }));
 
   // Broadcast the new log entry to all connected WebSocket clients
   wsBroadcaster.broadcast('ACTIVITY_LOG', entry);
@@ -410,7 +411,7 @@ app.post('/api/kestra-webhook', (req, res) => {
     if (aiLogs.length > 50) aiLogs.pop();
 
     // Persist to PostgreSQL (fire-and-forget)
-    insertAIReport(aiReport, aiReport).catch(() => { });
+    insertAIReport(aiReport, aiReport).catch(err => handleDatabaseError(err, 'insertAIReport', { aiReport }));
 
     logActivity('info', 'Received new AI Analysis report');
 
