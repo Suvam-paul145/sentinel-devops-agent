@@ -6,6 +6,7 @@ const { scanImage } = require('../security/scanner');
 const EventEmitter = require('events');
 const metricsStore = require('../db/metrics-store');
 const { predictContainer } = require('./predictor');
+const { handleAsyncError } = require('../utils/errorHandler');
 
 class ContainerMonitor extends EventEmitter {
     constructor() {
@@ -197,10 +198,10 @@ class ContainerMonitor extends EventEmitter {
     }
 
     scheduleSecurityScan(containerId, imageId) {
-        scanImage(imageId).catch(err => console.error(`[Security] Automated scan failed for ${containerId}:`, err.message));
+        scanImage(imageId).catch(err => handleAsyncError(err, `Security scan failed for container ${containerId}`, { containerId, imageId }));
         const interval = 24 * 60 * 60 * 1000;
         const timer = setInterval(() => {
-            scanImage(imageId).catch(err => console.error(`[Security] Periodic scan failed for ${containerId}:`, err.message));
+            scanImage(imageId).catch(err => handleAsyncError(err, `Periodic security scan failed for container ${containerId}`, { containerId, imageId }));
         }, interval);
         this.securityTimers.set(containerId, timer);
     }
