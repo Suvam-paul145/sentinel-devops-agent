@@ -18,12 +18,12 @@ export function useLogs() {
     const [isPaused, setIsPaused] = useState(false);
     const [filterLevel, setFilterLevel] = useState<LogLevel | "all">("all");
     const [search, setSearch] = useState("");
-    const intervalRef = useRef<NodeJS.Timeout | null>(null);
-    const lastMessage = useWebSocketMessage();
+    const isFetchingRef = useRef(false);
     const [error, setError] = useState<string | null>(null);
 
     const fetchLogs = useCallback(async () => {
-        if (isPaused) return;
+        if (isPaused || isFetchingRef.current) return;
+        isFetchingRef.current = true;
         try {
             const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
             const res = await fetch(`${API_BASE}/api/activity`);
@@ -47,20 +47,21 @@ export function useLogs() {
                     };
                 });
                 setLogs(formattedLogs);
+                setError(null); // Clear error on success
             }
         } catch (e) {
             console.error("Failed to fetch logs:", e);
             setError(e instanceof Error ? e.message : "Failed to fetch logs");
+        } finally {
+            isFetchingRef.current = false;
         }
     }, [isPaused]);
 
     useEffect(() => {
         // eslint-disable-next-line
         void fetchLogs(); // Async call, safe to ignore sync warning
-        intervalRef.current = setInterval(fetchLogs, 3000);
-        return () => {
-            if (intervalRef.current) clearInterval(intervalRef.current);
-        };
+        const interval = setInterval(fetchLogs, 3000);
+        return () => clearInterval(interval);
     }, [fetchLogs]);
 
     // Client-side filtering

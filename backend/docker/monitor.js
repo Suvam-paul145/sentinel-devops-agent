@@ -28,12 +28,12 @@ class ContainerMonitor extends EventEmitter {
         console.log('🚀 Initializing Docker Event-Driven Monitor with Analytics...');
 
         try {
-            const eventStream = await docker.getEvents({
+            this.eventStream = await docker.getEvents({
                 filters: { type: ['container'], event: ['start', 'stop', 'die', 'destroy'] }
             });
 
             let buffer = '';
-            eventStream.on('data', (chunk) => {
+            this.eventStream.on('data', (chunk) => {
                 buffer += chunk.toString('utf8');
                 const lines = buffer.split('\n');
                 buffer = lines.pop() || '';
@@ -60,7 +60,7 @@ class ContainerMonitor extends EventEmitter {
                 }
             });
 
-            eventStream.on('error', (err) => {
+            this.eventStream.on('error', (err) => {
                 console.error('❌ Docker event stream error:', err);
                 this.isRunning = false;
                 setTimeout(() => this.init(), 5000);
@@ -161,6 +161,10 @@ class ContainerMonitor extends EventEmitter {
         if (this.timer) {
             clearInterval(this.timer);
             this.timer = null;
+        }
+        if (this.eventStream) {
+            this.eventStream.destroy();
+            this.eventStream = null;
         }
         for (const timerId of this.securityTimers.values()) {
             clearInterval(timerId);

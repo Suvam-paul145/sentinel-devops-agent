@@ -3,11 +3,12 @@ import { RunbookTrigger, RunbookAction } from '@/lib/runbook-types';
 
 interface RuleEditorProps {
     item: RunbookTrigger | RunbookAction;
+    itemType: 'trigger' | 'action';
     onSave: (updated: RunbookTrigger | RunbookAction) => void;
     onCancel: () => void;
 }
 
-export function RuleEditor({ item, onSave, onCancel }: RuleEditorProps) {
+export function RuleEditor({ item, itemType, onSave, onCancel }: RuleEditorProps) {
     const [formData, setFormData] = useState<RunbookTrigger | RunbookAction>({ ...item } as RunbookTrigger | RunbookAction);
 
     useEffect(() => {
@@ -15,17 +16,17 @@ export function RuleEditor({ item, onSave, onCancel }: RuleEditorProps) {
     }, [item]);
 
     const handleChange = (key: string, value: any) => {
-        if ('type' in item && 'parameters' in (formData as RunbookAction)) {
+        if (itemType === 'action') {
             setFormData((prev) => ({
                 ...prev,
-                parameters: { ...prev.parameters, [key]: value }
+                parameters: { ...(prev as RunbookAction).parameters, [key]: value }
             }));
         } else {
             setFormData((prev) => ({ ...prev, [key]: value }));
         }
     };
 
-    const isAction = 'parameters' in item;
+    const isAction = itemType === 'action';
 
     return (
         <div className="fixed inset-y-0 right-0 w-80 bg-slate-900/95 border-l border-slate-700 p-6 z-50 shadow-2xl backdrop-blur-xl animate-in slide-in-from-right duration-300">

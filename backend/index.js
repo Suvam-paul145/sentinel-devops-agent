@@ -11,6 +11,8 @@ const axios = require('axios');
 const { listContainers, getContainerHealth } = require('./docker/client');
 const containerMonitor = require('./docker/monitor');
 const healer = require('./docker/healer');
+const { hostManager } = require('./docker/client');
+const { loadHostsConfig } = require('./config/hosts');
 const scalingPredictor = require('./docker/scaling-predictor');
 const { insertActivityLog, getActivityLogs, insertAIReport, getAIReports } = require('./db/logs');
 
@@ -254,10 +256,18 @@ app.post('/api/kestra-webhook', (req, res) => {
 
 app.post('/api/action/:service/:type', async (req, res) => {
   const { service, type } = req.params;
+  const cluster = req.query.cluster || req.body.cluster;
   // Use dynamic service port mapping from configuration
   // FIX: Resolve full qualified key (cluster:name) for port map lookup
   const servicePortMap = getServicePortMap();
-  const serviceConfig = services.find(s => s.name === service);
+
+  let serviceConfig;
+  if (cluster) {
+    serviceConfig = services.find(s => s.name === service && s.cluster === cluster);
+  } else {
+    serviceConfig = services.find(s => s.name === service);
+  }
+
   const qualifiedKey = serviceConfig ? `${serviceConfig.cluster}:${service}` : service;
   const port = servicePortMap[qualifiedKey];
 
@@ -417,7 +427,7 @@ app.post('/api/docker/scale/:service/:replicas', requireDockerAuth, validateScal
 /**
  * GET /api/clusters - Get all services grouped by cluster
  */
-app.get('/api/clusters', (req, res) => {
+app.get('/api/clusters', requireAuth, (req, res) => {
   const clusters = serviceMonitor.getServicesGroupedByCluster();
   res.json({ clusters });
 });
@@ -425,7 +435,7 @@ app.get('/api/clusters', (req, res) => {
 /**
  * GET /api/regions - Get all services grouped by region
  */
-app.get('/api/regions', (req, res) => {
+app.get('/api/regions', requireAuth, (req, res) => {
   const regions = serviceMonitor.getServicesGroupedByRegion();
   res.json({ regions });
 });
@@ -433,7 +443,7 @@ app.get('/api/regions', (req, res) => {
 /**
  * GET /api/services/grouped - Get services with cluster/region metadata
  */
-app.get('/api/services/grouped', (req, res) => {
+app.get('/api/services/grouped', requireAuth, (req, res) => {
   const groupBy = req.query.groupBy || 'cluster';
 
   if (groupBy === 'region') {
@@ -495,8 +505,24 @@ app.post('/api/remote-agent/report', (req, res) => {
     return res.status(400).json({ error: 'Invalid report type' });
   }
 
+  // Validate reportedServices using Zod
+  const ReportedServiceSchema = z.object({
+    status: z.string(),
+    cpu: z.union([z.string(), z.number()]).optional(),
+    memory: z.any().optional(),
+    lastUpdated: z.string().optional()
+  });
+
+  const ReportedServicesSchema = z.record(ReportedServiceSchema);
+
   if (!clusterId || !reportedServices) {
     return res.status(400).json({ error: 'Missing clusterId or services in report' });
+  }
+
+  try {
+    ReportedServicesSchema.parse(reportedServices);
+  } catch (err) {
+    return res.status(400).json({ error: 'Invalid services format in report', details: err.errors });
   }
 
   // Handle the remote agent report
@@ -530,10 +556,18 @@ app.get('/api/remote-agent/status', (req, res) => {
 
 let globalWsBroadcaster;
 
-const server = app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Sentinel Backend running on http://0.0.0.0:${PORT}`);
   // Start FinOps metrics collector
   startFinOpsCollector();
+
+  // Initialize Host Manager with configuration
+  try {
+    await hostManager.loadHosts(loadHostsConfig());
+    console.log('✅ Host Manager initialized');
+  } catch (err) {
+    console.error('❌ Failed to initialize Host Manager:', err);
+  }
 });
 
 // Setup WebSocket
